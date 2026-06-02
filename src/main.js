@@ -343,6 +343,89 @@ addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('wheel', e => { camDist = THREE.MathUtils.clamp(camDist + Math.sign(e.deltaY) * 2, 16, 60); }, { passive: true });
 
+// ============================================================ タッチ操作（スマホ）
+// 左半分=フローティング仮想スティック（移動・強く倒すとダッシュ） / 右半分=視点ドラッグ / 2本指=ズーム
+const joyVec = { x: 0, y: 0, mag: 0 };       // x:右, y:前(上倒し), mag:0..1
+const isTouch = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
+if (isTouch) document.body.classList.add('touch');
+
+const joyBase = document.getElementById('joyBase');
+const joyKnob = document.getElementById('joyKnob');
+const JOY_R = 56;
+let joyId = null, joyOx = 0, joyOy = 0;        // スティック中心
+const camSet = new Set();                       // 視点操作中のタッチID
+let camLastX = 0, pinchDist = null;
+
+function showJoy(x, y) {
+  joyOx = x; joyOy = y;
+  joyBase.style.left = x + 'px'; joyBase.style.top = y + 'px';
+  joyBase.style.display = 'block';
+}
+function moveJoy(x, y) {
+  let dx = x - joyOx, dy = y - joyOy;
+  const len = Math.hypot(dx, dy);
+  if (len > JOY_R) { dx = dx / len * JOY_R; dy = dy / len * JOY_R; }
+  joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  joyVec.x = dx / JOY_R;
+  joyVec.y = -dy / JOY_R;                        // 画面上方向 = 前進
+  joyVec.mag = Math.min(1, len / JOY_R);
+}
+function endJoy() {
+  joyBase.style.display = 'none';
+  joyKnob.style.transform = 'translate(-50%, -50%)';
+  joyVec.x = joyVec.y = joyVec.mag = 0;
+}
+// 現在画面に触れている「視点用」タッチを取得
+function camTouches(touchList) {
+  const arr = [];
+  for (const t of touchList) if (camSet.has(t.identifier)) arr.push(t);
+  return arr;
+}
+// UI要素（パネル/ヘッダ）の上で始まったタッチは操作対象外
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui')); }
+
+addEventListener('touchstart', e => {
+  if (onUI(e.target)) return;                    // スライダー等はそのまま操作
+  for (const t of e.changedTouches) {
+    if (t.clientX < innerWidth * 0.5 && joyId === null) {
+      joyId = t.identifier; showJoy(t.clientX, t.clientY); moveJoy(t.clientX, t.clientY);
+    } else {
+      camSet.add(t.identifier);
+    }
+  }
+  const cams = camTouches(e.touches);
+  if (cams.length >= 2) pinchDist = Math.hypot(cams[0].clientX - cams[1].clientX, cams[0].clientY - cams[1].clientY);
+  else if (cams.length === 1) camLastX = cams[0].clientX;
+  e.preventDefault();
+}, { passive: false });
+
+addEventListener('touchmove', e => {
+  if (onUI(e.target)) return;
+  for (const t of e.changedTouches) if (t.identifier === joyId) moveJoy(t.clientX, t.clientY);
+  const cams = camTouches(e.touches);
+  if (cams.length >= 2) {                         // ピンチズーム
+    const d = Math.hypot(cams[0].clientX - cams[1].clientX, cams[0].clientY - cams[1].clientY);
+    if (pinchDist !== null) camDist = THREE.MathUtils.clamp(camDist - (d - pinchDist) * 0.05, 16, 60);
+    pinchDist = d;
+  } else if (cams.length === 1) {                 // 視点回転
+    camYaw -= (cams[0].clientX - camLastX) * 0.008;
+    camLastX = cams[0].clientX;
+  }
+  e.preventDefault();
+}, { passive: false });
+
+function onTouchEnd(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === joyId) { joyId = null; endJoy(); }
+    camSet.delete(t.identifier);
+  }
+  const cams = camTouches(e.touches);
+  pinchDist = cams.length >= 2 ? Math.hypot(cams[0].clientX - cams[1].clientX, cams[0].clientY - cams[1].clientY) : null;
+  if (cams.length === 1) camLastX = cams[0].clientX;
+}
+addEventListener('touchend', onTouchEnd);
+addEventListener('touchcancel', onTouchEnd);
+
 // ============================================================ UI
 const $ = id => document.getElementById(id);
 let bloomOn = true, dofOn = true, pixelOn = false;
@@ -364,6 +447,11 @@ $('bloomStr').oninput = e => bloom.strength = +e.target.value;
 $('dofAp').oninput = e => { bokeh.uniforms['aperture'].value = +e.target.value * 0.001; };
 let timeOfDay = 0.5;
 $('timeOfDay').oninput = e => { timeOfDay = +e.target.value; };
+// パネル折りたたみ（タイトルをタップ/クリック）。スマホでは初期折りたたみ。
+const panelEl = document.getElementById('panel');
+const panelTitle = panelEl.querySelector('.title');
+if (isTouch) panelEl.classList.add('collapsed');
+panelTitle.addEventListener('click', () => panelEl.classList.toggle('collapsed'));
 syncUI();
 
 // 時刻 → ライト/空のグラデーション
@@ -425,26 +513,29 @@ function update(dt, t) {
   if (keys['q']) camYaw -= dt * 1.4;
   if (keys['e']) camYaw += dt * 1.4;
 
-  // --- 移動（カメラ基準） ---
-  const speed = (keys['shift'] ? 11 : 6);
+  // --- 移動（カメラ基準）: キーボード(デジタル) + 仮想スティック(アナログ) ---
   const forward = new THREE.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
   const rightV = new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw));
-  vel.set(0, 0, 0);
-  if (keys['w'] || keys['arrowup']) vel.add(forward);
-  if (keys['s'] || keys['arrowdown']) vel.sub(forward);
-  if (keys['d'] || keys['arrowright']) vel.add(rightV);
-  if (keys['a'] || keys['arrowleft']) vel.sub(rightV);
-  const moving = vel.lengthSq() > 0.001;
+  let ix = 0, iy = 0; // ix:右, iy:前
+  if (keys['w'] || keys['arrowup']) iy += 1;
+  if (keys['s'] || keys['arrowdown']) iy -= 1;
+  if (keys['d'] || keys['arrowright']) ix += 1;
+  if (keys['a'] || keys['arrowleft']) ix -= 1;
+  ix += joyVec.x; iy += joyVec.y;
+  const inMag = Math.hypot(ix, iy);
+  if (inMag > 1) { ix /= inMag; iy /= inMag; } // 斜め・併用でも最大1に
+  const dash = keys['shift'] || joyVec.mag > 0.9;
+  const speed = dash ? 11 : 6;
+  vel.copy(forward).multiplyScalar(iy).addScaledVector(rightV, ix).multiplyScalar(speed * dt);
+  const moving = (inMag > 0.05);
   if (moving) {
-    vel.normalize().multiplyScalar(speed * dt);
     const nx = player.position.x + vel.x, nz = player.position.z + vel.z;
     if (Math.hypot(nx, nz) < 8.8) { player.position.x = nx; player.position.z = nz; } // 平地内に制限
     // 向き：画面上での左右と前後
-    const screenRight = vel.dot(rightV);
-    const screenFwd = vel.dot(forward);
+    const screenRight = ix, screenFwd = iy;
     if (Math.abs(screenRight) > 0.0005) facingFlip = screenRight < 0;
     lastBack = screenFwd > Math.abs(screenRight) * 0.6; // 奥向き=背面
-    walkAnim += dt * 9;
+    walkAnim += dt * (dash ? 13 : 9);
     const fr = 1 + (Math.floor(walkAnim) % 2); // 1,2 交互
     setFrame(fr, lastBack, facingFlip);
   } else {

@@ -2,12 +2,16 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>HD-2D Demo — Octopath風</title>
   <style>
     :root { color-scheme: dark; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #05060a; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden; background: #05060a;
+      touch-action: none; overscroll-behavior: none; -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
     canvas { display: block; }
 
     #ui {
@@ -40,6 +44,40 @@
       background: #05060a; color: #9aa; font-family: ui-monospace, monospace; letter-spacing: .2em;
       transition: opacity .6s ease;
     }
+
+    /* 仮想スティック（タッチ） */
+    #joyBase {
+      position: fixed; z-index: 8; width: 130px; height: 130px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.22); background: radial-gradient(circle, rgba(255,255,255,.08), rgba(255,255,255,.02));
+      transform: translate(-50%, -50%); pointer-events: none; display: none;
+      box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    }
+    #joyKnob {
+      position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; border-radius: 50%;
+      transform: translate(-50%, -50%);
+      background: radial-gradient(circle at 40% 35%, #ffe6a8, #e0a64e);
+      box-shadow: 0 2px 10px rgba(0,0,0,.5);
+    }
+    #touchHint {
+      position: fixed; right: 14px; bottom: 14px; z-index: 8; pointer-events: none;
+      font-family: ui-monospace, monospace; font-size: 11px; color: #d8d2c4;
+      text-shadow: 0 2px 6px rgba(0,0,0,.8); text-align: right; line-height: 1.6; opacity: .7;
+      display: none;
+    }
+
+    /* 折りたたみ可能パネル */
+    #panel .title { cursor: pointer; pointer-events: auto; }
+    #panel.collapsed .row { display: none; }
+    #panel.collapsed .title::after { content: ' ▸'; }
+    #panel:not(.collapsed) .title::after { content: ' ▾'; }
+
+    /* スマホ向け調整 */
+    @media (pointer: coarse), (max-width: 720px) {
+      #ui .keys { display: none; }
+      #panel { width: 170px; font-size: 12px; padding: 10px 12px; }
+      #panel input[type=range] { width: 78px; }
+      body.touch #joyBase, body.touch #touchHint { display: block; }
+    }
   </style>
 </head>
 <body>
@@ -61,6 +99,9 @@
     <div class="row"><label>時刻</label><input id="timeOfDay" type="range" min="0" max="1" step="0.001" /></div>
     <div class="row"><label class="toggle" id="pxTog">● ピクセル化</label><span class="val" id="pxV"></span></div>
   </div>
+
+  <div id="joyBase"><div id="joyKnob"></div></div>
+  <div id="touchHint">左: 移動（強く倒すとダッシュ）<br/>右: ドラッグで視点 / 2本指でズーム</div>
 
   <div id="loading">LOADING…</div>
 
