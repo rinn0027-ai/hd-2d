@@ -51,8 +51,8 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
   const heroMat = new THREE.MeshBasicMaterial({ map: heroSheet.texture, transparent: true, alphaTest: 0.4, fog: true });
   heroMat.map.repeat.set(1 / heroSheet.cols, 1 / heroSheet.rows);
   heroMat.map.offset.set(0, 0); // 背面・静止
-  const hero = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 4.7), heroMat);
-  hero.position.set(-4.5, 2.5, 2.5);
+  const hero = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 4.0), heroMat);
+  hero.position.set(-4.5, 2.2, 2.5);
   scene.add(hero);
 
   // ---- 敵 ----
@@ -84,7 +84,7 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
     if (pointers.size >= 2) {
       const a = [...pointers.values()];
       const d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
-      if (bPinch != null) bDist = THREE.MathUtils.clamp(bDist - (d - bPinch) * 0.04, 8, 20);
+      if (bPinch != null) bDist = THREE.MathUtils.clamp(bDist - (d - bPinch) * 0.06, 7, 34);
       bPinch = d;
     } else {
       bYaw = THREE.MathUtils.clamp(bYaw - dx * 0.006, -0.85, 0.85);
@@ -177,7 +177,7 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
   // 毎フレーム呼ばれる（メインループから）
   function update(dt, t) {
     const sway = Math.sin(t * 2) * 0.05;
-    hero.position.y = 2.5 + sway; hero.rotation.y = bYaw;        // 常にカメラを向く
+    hero.position.y = 2.2 + sway; hero.rotation.y = bYaw;        // 常にカメラを向く
     if (edata) enemy.position.y = edata.y + Math.sin(t * 1.6) * (edata.sprite === 'bat' ? 0.35 : 0.12);
     enemy.rotation.y = bYaw;
     // ヒットの揺れ

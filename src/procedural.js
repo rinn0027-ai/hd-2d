@@ -27,6 +27,28 @@ function makeCanvas(size) {
   c.width = c.height = size;
   return c;
 }
+function makeCanvasWH(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+// 接地影（楕円）
+function drawShadow(g, cx, cy, rx, ry = 3.2, alpha = 0.28) {
+  g.fillStyle = `rgba(0,0,0,${alpha})`;
+  g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); g.fill();
+}
+
+// 中身を一旦個別キャンバスに描き、黒い縁取りを付けて返す（隣コマへにじまない）
+function buildOutlinedFrame(drawContent, w, h, outline = '#0b0c16') {
+  const a = makeCanvasWH(w, h); const ac = a.getContext('2d'); ac.imageSmoothingEnabled = false; drawContent(ac);
+  const s = makeCanvasWH(w, h); const sc = s.getContext('2d'); sc.imageSmoothingEnabled = false;
+  sc.drawImage(a, 0, 0); sc.globalCompositeOperation = 'source-in'; sc.fillStyle = outline; sc.fillRect(0, 0, w, h);
+  const r = makeCanvasWH(w, h); const rc = r.getContext('2d'); rc.imageSmoothingEnabled = false;
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) rc.drawImage(s, dx, dy);
+  rc.drawImage(a, 0, 0);
+  return r;
+}
 
 function toTexture(canvas, { nearest = false, repeat = 1, srgb = true } = {}) {
   const tex = new THREE.CanvasTexture(canvas);
@@ -123,7 +145,7 @@ function px(g, x, y, w, h, col) { g.fillStyle = col; g.fillRect(x, y, w, h); }
 
 const DEFAULT_PAL = { cloak: '#3b86a8', cloakBack: '#2f6f8f', cloakSh: '#235468', hat: '#caa45a', hatSh: '#9c7b3c', hatTop: '#e0bd72', tunic: '#caa15a', belt: '#9c3b3b' };
 
-function drawTraveler(g, ox, frame, back, pal = DEFAULT_PAL) {
+function drawTraveler(g, ox, frame, back, pal = DEFAULT_PAL, shadow = true) {
   // frame: 0 静止, 1 左足, 2 右足
   const bob = frame === 0 ? 0 : (frame === 1 ? -1 : -1);
   const legL = frame === 1 ? 2 : 0;
@@ -135,9 +157,7 @@ function drawTraveler(g, ox, frame, back, pal = DEFAULT_PAL) {
   const cx = ox + TW / 2;
   const y0 = 6 + bob;
 
-  // 影
-  g.fillStyle = 'rgba(0,0,0,0.28)';
-  g.beginPath(); g.ellipse(cx, 37, 9, 3.2, 0, 0, Math.PI * 2); g.fill();
+  if (shadow) drawShadow(g, cx, 37, 9);
 
   // 脚／ブーツ
   px(g, cx - 5, 28 - legL, 4, 8 + legL, boot);
@@ -171,17 +191,18 @@ function drawTraveler(g, ox, frame, back, pal = DEFAULT_PAL) {
 
 export function characterSpriteSheet(pal = DEFAULT_PAL) {
   const cols = 3, rows = 2; // [front x3][back x3]
-  const c = makeCanvas(256); // 余裕を持たせて後でrepeat設定
+  const c = makeCanvas(256);
   c.width = TW * cols; c.height = TH * rows;
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
   g.clearRect(0, 0, c.width, c.height);
   for (let f = 0; f < cols; f++) {
-    drawTraveler(g, f * TW, f, false, pal);          // 上段: front
-    g.save();
-    g.translate(0, TH);
-    drawTraveler(g, f * TW, f, true, pal);           // 下段: back
-    g.restore();
+    for (let row = 0; row < 2; row++) {
+      const back = row === 1, oy = row * TH;
+      drawShadow(g, f * TW + TW / 2, oy + 37, 9);                       // 影（縁取りなし）
+      const frame = buildOutlinedFrame(ctx => drawTraveler(ctx, 0, f, back, pal, false), TW, TH);
+      g.drawImage(frame, f * TW, oy);
+    }
   }
   const tex = new THREE.CanvasTexture(c);
   tex.magFilter = THREE.NearestFilter;
@@ -203,7 +224,7 @@ function crescent(g, cx, cy, r, w, color, a0 = Math.PI * 0.32, a1 = Math.PI * 1.
   g.beginPath(); g.arc(cx, cy, r, a0, a1); g.stroke();
 }
 
-function drawMage(g, ox, frame, back) {
+function drawMage(g, ox, frame, back, shadow = true) {
   const cx = ox + MW / 2;
   const bob = frame === 0 ? 0 : -1;
   const hem = frame === 1 ? 1 : (frame === 2 ? -1 : 0);
@@ -214,9 +235,7 @@ function drawMage(g, ox, frame, back) {
   const blue = '#2c3f7c', blueD = '#1b2a56', star = '#e3e9ff';
   const silver = '#d6dfee', gem = '#5b8fd6', pole = '#4a4f60';
 
-  // 影
-  g.fillStyle = 'rgba(0,0,0,0.28)';
-  g.beginPath(); g.ellipse(cx, 49 + y, 12, 3.2, 0, 0, Math.PI * 2); g.fill();
+  if (shadow) drawShadow(g, cx, 49 + y, 12);
 
   // 後ろ髪（最背面・ロング）
   g.fillStyle = hair; rr(g, cx - 14, 7 + y, 28, 41, 12);
@@ -283,8 +302,13 @@ export function mageSpriteSheet() {
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false; g.clearRect(0, 0, c.width, c.height);
   for (let f = 0; f < cols; f++) {
-    drawMage(g, f * MW, f, false);
-    g.save(); g.translate(0, MH); drawMage(g, f * MW, f, true); g.restore();
+    for (let row = 0; row < 2; row++) {
+      const back = row === 1, oy = row * MH;
+      const bob = f === 0 ? 0 : -1;
+      drawShadow(g, f * MW + MW / 2, oy + 49 + bob, 12);
+      const frame = buildOutlinedFrame(ctx => drawMage(ctx, 0, f, back, false), MW, MH);
+      g.drawImage(frame, f * MW, oy);
+    }
   }
   const tex = new THREE.CanvasTexture(c);
   tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
@@ -443,9 +467,7 @@ function finishSprite(c) {
   tex.needsUpdate = true; return tex;
 }
 
-export function enemySprite(type = 'slime', size = 96) {
-  const { c, g } = spriteCanvas(size);
-  const cx = size / 2, base = size - 12;
+function drawEnemyBody(g, type, cx, base) {
   if (type === 'slime') {
     g.fillStyle = '#3ba24e';
     g.beginPath();
@@ -473,5 +495,12 @@ export function enemySprite(type = 'slime', size = 96) {
     px(g, cx - 8, base - 14, 3, 4, '#5a4a2a'); px(g, cx + 5, base - 14, 3, 4, '#5a4a2a'); // 目
     px(g, cx - 4, base - 7, 8, 2, '#5a4a2a');
   }
+}
+
+export function enemySprite(type = 'slime', size = 96) {
+  const { c, g } = spriteCanvas(size);                 // 影は描画済み
+  const cx = size / 2, base = size - 12;
+  const body = buildOutlinedFrame(bg => drawEnemyBody(bg, type, cx, base), size, size);
+  g.drawImage(body, 0, 0);
   return finishSprite(c);
 }

@@ -416,8 +416,8 @@ const sheet = P.mageSpriteSheet();
 const charMat = new THREE.MeshBasicMaterial({ map: sheet.texture.clone(), transparent: true, alphaTest: 0.4, fog: true });
 charMat.map.magFilter = THREE.NearestFilter; charMat.map.minFilter = THREE.NearestFilter;
 charMat.map.repeat.set(1 / sheet.cols, 1 / sheet.rows);
-const player = new THREE.Mesh(new THREE.PlaneGeometry(3.5, 4.55), charMat);
-player.position.set(0, 2.65, 4);
+const player = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 3.65), charMat);
+player.position.set(0, 2.2, 4);
 scene.add(player);
 // 接地シャドウ（簡易ブロブ）
 const blobMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false });
@@ -738,7 +738,7 @@ addEventListener('keydown', e => {
   if (k === ' ' || k === 'enter' || k === 'f') { interact(); e.preventDefault(); } // 決定（QとEはカメラ回転に使用）
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-addEventListener('wheel', e => { camDist = THREE.MathUtils.clamp(camDist + Math.sign(e.deltaY) * 2, 16, 60); }, { passive: true });
+addEventListener('wheel', e => { camDist = THREE.MathUtils.clamp(camDist + Math.sign(e.deltaY) * 3, 12, 95); }, { passive: true });
 
 // モバイル決定ボタン
 const btnA = document.getElementById('btnA');
@@ -816,7 +816,7 @@ addEventListener('touchmove', e => {
   if (ids.length >= 2) {                          // ピンチズーム（どの位置の2本でも）
     const a = touchMap.get(ids[0]), b = touchMap.get(ids[1]);
     const d = Math.hypot(a.x - b.x, a.y - b.y);
-    if (pinchDist !== null) camDist = THREE.MathUtils.clamp(camDist - (d - pinchDist) * 0.06, 16, 60);
+    if (pinchDist !== null) camDist = THREE.MathUtils.clamp(camDist - (d - pinchDist) * 0.09, 12, 95);
     pinchDist = d;
   } else if (ids.length === 1) {
     const id = ids[0], p = touchMap.get(id);
@@ -1020,7 +1020,7 @@ function update(dt, t) {
     setFrame(0, lastBack, facingFlip);
   }
  } // フィールド時のみ入力/移動
-  player.position.y = 2.65 + Math.sin(t * 2.2) * 0.04; // 待機の浮遊
+  player.position.y = 2.2 + Math.sin(t * 2.2) * 0.04; // 待機の浮遊
   player.rotation.y = camYaw; // 常にカメラを向くビルボード
   playerBlob.position.set(player.position.x, 0.42, player.position.z);
 
