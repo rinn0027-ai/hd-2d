@@ -121,15 +121,17 @@ const TW = 32, TH = 40; // 1フレームの解像度
 
 function px(g, x, y, w, h, col) { g.fillStyle = col; g.fillRect(x, y, w, h); }
 
-function drawTraveler(g, ox, frame, back) {
+const DEFAULT_PAL = { cloak: '#3b86a8', cloakBack: '#2f6f8f', cloakSh: '#235468', hat: '#caa45a', hatSh: '#9c7b3c', hatTop: '#e0bd72', tunic: '#caa15a', belt: '#9c3b3b' };
+
+function drawTraveler(g, ox, frame, back, pal = DEFAULT_PAL) {
   // frame: 0 静止, 1 左足, 2 右足
   const bob = frame === 0 ? 0 : (frame === 1 ? -1 : -1);
   const legL = frame === 1 ? 2 : 0;
   const legR = frame === 2 ? 2 : 0;
   const skin = '#e8b88c', skinSh = '#c99268';
-  const cloak = back ? '#2f6f8f' : '#3b86a8', cloakSh = '#235468';
-  const hat = '#caa45a', hatSh = '#9c7b3c';
-  const boot = '#4b3520', tunic = '#caa15a';
+  const cloak = back ? pal.cloakBack : pal.cloak, cloakSh = pal.cloakSh;
+  const hat = pal.hat, hatSh = pal.hatSh;
+  const boot = '#4b3520', tunic = pal.tunic;
   const cx = ox + TW / 2;
   const y0 = 6 + bob;
 
@@ -161,13 +163,13 @@ function drawTraveler(g, ox, frame, back) {
   px(g, cx - 7, y0 + 1, 14, 3, hat);
   px(g, cx - 7, y0 + 3, 14, 1, hatSh);
   px(g, cx - 4, y0 - 3, 8, 5, hat);
-  px(g, cx - 4, y0 - 3, 8, 2, '#e0bd72');
+  px(g, cx - 4, y0 - 3, 8, 2, pal.hatTop);
 
   // 腰の帯
-  px(g, cx - 7, y0 + 20, 14, 2, '#9c3b3b');
+  px(g, cx - 7, y0 + 20, 14, 2, pal.belt);
 }
 
-export function characterSpriteSheet() {
+export function characterSpriteSheet(pal = DEFAULT_PAL) {
   const cols = 3, rows = 2; // [front x3][back x3]
   const c = makeCanvas(256); // 余裕を持たせて後でrepeat設定
   c.width = TW * cols; c.height = TH * rows;
@@ -175,10 +177,10 @@ export function characterSpriteSheet() {
   g.imageSmoothingEnabled = false;
   g.clearRect(0, 0, c.width, c.height);
   for (let f = 0; f < cols; f++) {
-    drawTraveler(g, f * TW, f, false);              // 上段: front
+    drawTraveler(g, f * TW, f, false, pal);          // 上段: front
     g.save();
     g.translate(0, TH);
-    drawTraveler(g, f * TW, f, true);               // 下段: back
+    drawTraveler(g, f * TW, f, true, pal);           // 下段: back
     g.restore();
   }
   const tex = new THREE.CanvasTexture(c);
@@ -249,4 +251,60 @@ export function glowSprite(size = 64) {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
   return tex;
+}
+
+// ---- NPCの配色バリエーション ----
+export const NPC_PALETTES = {
+  villager: { cloak: '#7a8c3a', cloakBack: '#637030', cloakSh: '#4c5a26', hat: '#b06b3a', hatSh: '#854f2a', hatTop: '#c98a52', tunic: '#cdb27a', belt: '#5a3b22' },
+  merchant: { cloak: '#8a3b7a', cloakBack: '#6f2f63', cloakSh: '#54234c', hat: '#caa45a', hatSh: '#9c7b3c', hatTop: '#e0bd72', tunic: '#d8c070', belt: '#3b2a5a' },
+  guard:    { cloak: '#3a5a8c', cloakBack: '#2f4870', cloakSh: '#233a54', hat: '#9aa3ad', hatSh: '#6f7782', hatTop: '#c0c8d0', tunic: '#8a909a', belt: '#2a2f38' },
+  elder:    { cloak: '#6a5a8c', cloakBack: '#564870', cloakSh: '#3f3454', hat: '#d8d0c0', hatSh: '#a89f8c', hatTop: '#efe8d8', tunic: '#b8aa90', belt: '#4a3b5a' },
+};
+
+// ---- 敵スプライト（ビルボード） ----
+function spriteCanvas(size) {
+  const c = makeCanvas(size); const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false; g.clearRect(0, 0, size, size);
+  // 接地影
+  g.fillStyle = 'rgba(0,0,0,0.28)';
+  g.beginPath(); g.ellipse(size / 2, size - 8, size * 0.26, size * 0.06, 0, 0, Math.PI * 2); g.fill();
+  return { c, g };
+}
+function finishSprite(c) {
+  const tex = new THREE.CanvasTexture(c);
+  tex.magFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true; return tex;
+}
+
+export function enemySprite(type = 'slime', size = 96) {
+  const { c, g } = spriteCanvas(size);
+  const cx = size / 2, base = size - 12;
+  if (type === 'slime') {
+    g.fillStyle = '#3ba24e';
+    g.beginPath();
+    g.moveTo(cx - 28, base);
+    g.quadraticCurveTo(cx - 30, base - 38, cx, base - 40);
+    g.quadraticCurveTo(cx + 30, base - 38, cx + 28, base);
+    g.closePath(); g.fill();
+    g.fillStyle = '#5fd06f'; g.beginPath(); g.ellipse(cx - 8, base - 26, 8, 6, 0, 0, Math.PI * 2); g.fill(); // ハイライト
+    g.fillStyle = '#fff'; px(g, cx - 12, base - 22, 7, 8, '#fff'); px(g, cx + 5, base - 22, 7, 8, '#fff');
+    g.fillStyle = '#16301c'; px(g, cx - 10, base - 18, 3, 4, '#16301c'); px(g, cx + 7, base - 18, 3, 4, '#16301c');
+    px(g, cx - 6, base - 10, 12, 2, '#1c5a2a'); // 口
+  } else if (type === 'bat') {
+    g.fillStyle = '#6a4a8c'; // 翼
+    g.beginPath(); g.moveTo(cx, base - 30); g.lineTo(cx - 34, base - 44); g.lineTo(cx - 26, base - 24); g.lineTo(cx - 34, base - 18); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(cx, base - 30); g.lineTo(cx + 34, base - 44); g.lineTo(cx + 26, base - 24); g.lineTo(cx + 34, base - 18); g.closePath(); g.fill();
+    g.fillStyle = '#46315e'; g.beginPath(); g.ellipse(cx, base - 26, 12, 14, 0, 0, Math.PI * 2); g.fill(); // 胴
+    px(g, cx - 6, base - 32, 4, 5, '#ffd23a'); px(g, cx + 2, base - 32, 4, 5, '#ffd23a'); // 目
+    px(g, cx - 6, base - 27, 4, 2, '#1a1020'); px(g, cx + 2, base - 27, 4, 2, '#1a1020');
+    px(g, cx - 4, base - 40, 3, 5, '#46315e'); px(g, cx + 1, base - 40, 3, 5, '#46315e'); // 耳
+  } else if (type === 'mushroom') {
+    px(g, cx - 6, base - 22, 12, 22, '#e8d8b8'); // 軸
+    g.fillStyle = '#c0392b'; g.beginPath(); g.ellipse(cx, base - 24, 26, 18, 0, Math.PI, 0); g.fill(); // 傘
+    g.fillStyle = '#f0e6d2';
+    for (const [dx, dy, r] of [[-12, -26, 4], [8, -30, 5], [16, -22, 3], [-2, -34, 4]]) { g.beginPath(); g.arc(cx + dx, base + dy, r, 0, Math.PI * 2); g.fill(); }
+    px(g, cx - 8, base - 14, 3, 4, '#5a4a2a'); px(g, cx + 5, base - 14, 3, 4, '#5a4a2a'); // 目
+    px(g, cx - 4, base - 7, 8, 2, '#5a4a2a');
+  }
+  return finishSprite(c);
 }

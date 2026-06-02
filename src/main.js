@@ -7,6 +7,8 @@ import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as P from './procedural.js';
+import { createBattle, ENEMY_TYPES } from './battle.js';
+import * as Audio from './audio.js';
 
 // ============================================================ renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -299,6 +301,75 @@ function setFrame(col, back, flip) {
 }
 setFrame(0, false, false);
 
+// ============================================================ 障害物（円形コリジョン）
+// 木・池・建物などを円で近似。プレイヤーはこれらを通り抜けられない。
+const obstacles = [];
+function addObstacle(x, z, r) { obstacles.push({ x, z, r }); }
+// 木をコリジョン化
+for (const tr of trees) addObstacle(tr.position.x, tr.position.z, 1.0);
+// 池
+addObstacle(-7, -7, 4.2);
+
+// ============================================================ 建物（小屋）
+function buildHouse(x, z, rot = 0) {
+  const grp = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xb9a07a, roughness: 0.9 });
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2c, roughness: 0.8 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a3b3b, roughness: 0.8 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4.4, 3, 3.6), wallMat);
+  body.position.y = 1.9; body.castShadow = body.receiveShadow = true; grp.add(body);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(3.6, 2.2, 4), roofMat);
+  roof.position.y = 4.5; roof.rotation.y = Math.PI / 4; roof.castShadow = true; grp.add(roof);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.8, 0.2), woodMat);
+  door.position.set(0, 1.3, 1.85); grp.add(door);
+  grp.position.set(x, 0.4, z); grp.rotation.y = rot;
+  worldGroup.add(grp);
+  addObstacle(x, z, 2.6);
+  return grp;
+}
+buildHouse(5.5, 5.0, -0.4);
+
+// ============================================================ NPC（ビルボード + 対話）
+const npcs = [];
+function addNPC(x, z, paletteName, name, lines) {
+  const sh = P.characterSpriteSheet(P.NPC_PALETTES[paletteName]);
+  const mat = new THREE.MeshBasicMaterial({ map: sh.texture, transparent: true, alphaTest: 0.4, fog: true });
+  mat.map.repeat.set(1 / sh.cols, 1 / sh.rows); mat.map.offset.set(0, 0.5); // front idle
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.8), mat);
+  m.position.set(x, 2.3, z);
+  scene.add(m);
+  const npc = { mesh: m, name, lines, x, z, home: new THREE.Vector2(x, z), wanderT: Math.random() * 5, sheet: sh };
+  npcs.push(npc); addObstacle(x, z, 0.8);
+  return npc;
+}
+addNPC(2.5, 3.0, 'villager', '村人', ['やあ、旅の人。', 'この先の草むらには\nまものが出るから気をつけな。', 'ダッシュで駆け抜けるのも手だよ。']);
+addNPC(-2.0, 4.5, 'merchant', '行商人', ['いい天気… いや、もう夜かい？', '右上のつまみで時間を\n変えられるそうだ。不思議だね。']);
+addNPC(4.5, 2.0, 'guard', '衛兵', ['この街は平和そのものさ。', '草むらのまものを\n退治してくれると助かる。']);
+addNPC(-4.5, -2.0, 'elder', '長老', ['ようこそ、HD-2Dの世界へ。', '2Dの絵が3Dの光と影をまとう…', 'これぞ ディオラマの魔法じゃ。']);
+
+// ============================================================ 宝箱（交互作用）
+const chests = [];
+function addChest(x, z, reward) {
+  const grp = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.7, 0.8), new THREE.MeshStandardMaterial({ color: 0x7a4a24, roughness: 0.7 }));
+  base.position.y = 0.35; base.castShadow = true; grp.add(base);
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.35, 0.85), new THREE.MeshStandardMaterial({ color: 0x9c6a34, roughness: 0.6 }));
+  lid.position.y = 0.78; grp.add(lid);
+  const band = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.9, 0.2), new THREE.MeshStandardMaterial({ color: 0xd9c06a, metalness: 0.6, roughness: 0.4 }));
+  band.position.set(0, 0.5, 0); grp.add(band);
+  grp.position.set(x, 0.6, z); worldGroup.add(grp);
+  const chest = { grp, lid, x, z, opened: false, reward };
+  chests.push(chest); addObstacle(x, z, 0.7);
+  return chest;
+}
+addChest(6.5, -5.0, { potions: 2 });
+addChest(-6.0, 6.0, { potions: 1 });
+
+// ============================================================ 遭遇ゾーン（草むら円）
+const encounterZones = [
+  { x: 5, z: -6, r: 3.5 }, { x: -6, z: 4, r: 3.2 }, { x: 6, z: 6, r: 3.0 }, { x: -5, z: -5, r: 3.2 },
+];
+
 // ============================================================ ポストプロセス
 const composer = new EffectComposer(renderer);
 const renderPass = new RenderPass(scene, camera);
@@ -337,11 +408,142 @@ const gradePass = new ShaderPass({
 composer.addPass(gradePass);
 composer.addPass(new OutputPass());
 
+// ============================================================ ゲーム状態 / ステータス
+let gameState = 'field';                 // 'field' | 'dialogue' | 'battle'
+const hero = { hp: 60, maxHp: 60, sp: 12, maxSp: 12, potions: 1, exp: 0 };
+const battle = createBattle({ renderPass, bokeh, heroPal: undefined });
+let stepsSinceBattle = 0;                // 遭遇クールダウン用
+
+// ============================================================ 対話システム（タイプライタ）
+const dlgEl = document.getElementById('dialogue');
+const dlgName = document.getElementById('dlgName');
+const dlgText = document.getElementById('dlgText');
+let dlg = null; // { lines, idx, full, shown, done }
+
+function startDialogue(name, lines) {
+  gameState = 'dialogue';
+  dlg = { name, lines, idx: 0 };
+  dlgEl.style.display = 'block';
+  showDlgLine();
+}
+function showDlgLine() {
+  dlgName.textContent = dlg.name;
+  dlg.full = dlg.lines[dlg.idx];
+  dlg.shown = 0; dlg.done = false; dlgText.textContent = '';
+}
+function advanceDialogue() {
+  if (!dlg) return;
+  if (!dlg.done) { dlgText.textContent = dlg.full; dlg.shown = dlg.full.length; dlg.done = true; return; }
+  dlg.idx++;
+  if (dlg.idx >= dlg.lines.length) { endDialogue(); }
+  else { Audio.sfx('cursor'); showDlgLine(); }
+}
+function endDialogue() {
+  dlgEl.style.display = 'none'; dlg = null; gameState = 'field';
+}
+function updateDialogue(dt) {
+  if (!dlg || dlg.done) return;
+  dlg.shown += dt * 38; // 文字/秒
+  const n = Math.floor(dlg.shown);
+  if (n >= dlg.full.length) { dlgText.textContent = dlg.full; dlg.done = true; }
+  else dlgText.textContent = dlg.full.slice(0, n);
+}
+
+// ============================================================ エリア名トースト
+const areaToastEl = document.getElementById('areaToast');
+let areaToastTimer = null;
+function showArea(jp, en) {
+  areaToastEl.innerHTML = jp + '<span class="small">' + en + '</span>';
+  areaToastEl.style.opacity = '1';
+  clearTimeout(areaToastTimer);
+  areaToastTimer = setTimeout(() => { areaToastEl.style.opacity = '0'; }, 2200);
+}
+
+// ============================================================ トランジション（フラッシュ）
+const flashEl = document.getElementById('flash');
+function flash(color = '#fff', peak = 0.9) {
+  return new Promise(res => {
+    flashEl.style.background = color;
+    flashEl.style.opacity = String(peak);
+    setTimeout(() => { flashEl.style.opacity = '0'; res(); }, 200);
+  });
+}
+
+// 昼夜でBGMの雰囲気を切替
+function dayNightMood() { return (Math.abs(timeOfDay - 0.5) * 2 > 0.55) ? 'night' : 'day'; }
+
+// ============================================================ バトル起動
+async function triggerBattle() {
+  if (gameState !== 'field') return;
+  gameState = 'battle';
+  document.getElementById('btnA').classList.remove('show');
+  document.getElementById('hint').style.opacity = '0';
+  Audio.sfx('encounter');
+  await flash('#fff', 0.95);
+  await flash('#fff', 0.7);
+  const type = ENEMY_TYPES[Math.floor(Math.random() * ENEMY_TYPES.length)];
+  const result = await battle.start(type, hero);
+  await flash('#000', 0.85);
+  if (result === 'win') { hero.exp += 10; hero.sp = Math.min(hero.maxSp, hero.sp + 4); }
+  else if (result === 'lose') {
+    // 全回復して街へ戻す
+    hero.hp = hero.maxHp; hero.sp = hero.maxSp;
+    player.position.set(0, 2.4, 4);
+    showArea('街の広場', 'TOWN SQUARE');
+  }
+  stepsSinceBattle = 0;
+  // フィールドBGMに戻す
+  Audio.setMood(dayNightMood());
+  gameState = 'field';
+}
+
+// ============================================================ 交互作用（最寄りのNPC/宝箱）
+let nearTarget = null;
+function findInteract() {
+  let best = null, bestD = 2.6 * 2.6;
+  const px2 = player.position.x, pz2 = player.position.z;
+  for (const n of npcs) { const d = (n.mesh.position.x - px2) ** 2 + (n.mesh.position.z - pz2) ** 2; if (d < bestD) { bestD = d; best = { type: 'npc', ref: n }; } }
+  for (const c of chests) { if (c.opened) continue; const d = (c.x - px2) ** 2 + (c.z - pz2) ** 2; if (d < bestD) { bestD = d; best = { type: 'chest', ref: c }; } }
+  return best;
+}
+function interact() {
+  if (gameState === 'dialogue') { Audio.sfx('cursor'); advanceDialogue(); return; }
+  if (gameState !== 'field') return;
+  if (!nearTarget) return;
+  if (nearTarget.type === 'npc') { Audio.sfx('confirm'); startDialogue(nearTarget.ref.name, nearTarget.ref.lines); }
+  else if (nearTarget.type === 'chest') {
+    const c = nearTarget.ref; c.opened = true; c.lid.rotation.x = -1.1; c.lid.position.z = -0.3;
+    Audio.sfx('chest');
+    const got = c.reward.potions || 0; hero.potions += got;
+    startDialogue('たからばこ', [`やくそうを ${got}個 みつけた！`]);
+  }
+}
+
 // ============================================================ 入力
 const keys = {};
-addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+// 最初の操作でオーディオ起動（自動再生制限対策）
+function kickAudio() { Audio.ensureAudio(); }
+addEventListener('keydown', kickAudio, { once: true });
+addEventListener('pointerdown', kickAudio, { once: true });
+addEventListener('touchstart', kickAudio, { once: true });
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+  if (k === ' ' || k === 'enter' || k === 'f') { interact(); e.preventDefault(); } // 決定（QとEはカメラ回転に使用）
+});
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('wheel', e => { camDist = THREE.MathUtils.clamp(camDist + Math.sign(e.deltaY) * 2, 16, 60); }, { passive: true });
+
+// モバイル決定ボタン
+const btnA = document.getElementById('btnA');
+btnA.addEventListener('click', e => { e.preventDefault(); interact(); });
+btnA.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); interact(); }, { passive: false });
+
+// デスクトップ: 会話中はクリックで送り
+addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && gameState === 'dialogue' && !e.target.closest('#panel, #ui')) interact();
+});
 
 // ============================================================ タッチ操作（スマホ）
 // 左半分=フローティング仮想スティック（移動・強く倒すとダッシュ） / 右半分=視点ドラッグ / 2本指=ズーム
@@ -382,10 +584,12 @@ function camTouches(touchList) {
   return arr;
 }
 // UI要素（パネル/ヘッダ）の上で始まったタッチは操作対象外
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #bMenu, #btnA')); }
 
 addEventListener('touchstart', e => {
-  if (onUI(e.target)) return;                    // スライダー等はそのまま操作
+  if (onUI(e.target)) return;                    // スライダー/メニュー等はそのまま操作
+  if (gameState === 'dialogue') { e.preventDefault(); interact(); return; } // タップで送り
+  if (gameState === 'battle') { e.preventDefault(); return; }              // 移動/視点は無効
   for (const t of e.changedTouches) {
     if (t.clientX < innerWidth * 0.5 && joyId === null) {
       joyId = t.identifier; showJoy(t.clientX, t.clientY); moveJoy(t.clientX, t.clientY);
@@ -505,10 +709,34 @@ onResize();
 // ============================================================ ループ
 const clock = new THREE.Clock();
 const vel = new THREE.Vector3();
-let facingFlip = false, lastBack = false, walkAnim = 0;
+let facingFlip = false, lastBack = false, walkAnim = 0, stepTimer = 0;
 const tmp = new THREE.Vector3();
 
+// 草むらでの遭遇判定
+function checkEncounter(dt, x, z, dash) {
+  let inZone = false;
+  for (const z2 of encounterZones) { if ((x - z2.x) ** 2 + (z - z2.z) ** 2 < z2.r * z2.r) { inZone = true; break; } }
+  if (!inZone) { stepsSinceBattle = Math.max(0, stepsSinceBattle - dt); return; }
+  stepsSinceBattle += dt * (dash ? 1.7 : 1.0);
+  if (stepsSinceBattle > 1.0 && Math.random() < dt * 0.6) triggerBattle();
+}
+
+// 交互作用プロンプト（モバイル=決定ボタン / デスクトップ=テキストヒント）
+const hintEl = document.getElementById('hint');
+function updatePrompt() {
+  const show = gameState === 'dialogue' || (gameState === 'field' && !!nearTarget);
+  const verb = gameState === 'dialogue' ? '送る' : (nearTarget && nearTarget.type === 'chest' ? '調べる' : '話す');
+  if (isTouch) {
+    btnA.classList.toggle('show', show);
+    btnA.textContent = gameState === 'dialogue' ? '▼' : verb;
+  } else {
+    hintEl.style.opacity = show ? '1' : '0';
+    hintEl.textContent = (gameState === 'dialogue' ? '［Space / クリック］ ' : '［Space / F］ ') + verb;
+  }
+}
+
 function update(dt, t) {
+ if (gameState === 'field') {
   // --- カメラ回転入力 ---
   if (keys['q']) camYaw -= dt * 1.4;
   if (keys['e']) camYaw += dt * 1.4;
@@ -529,22 +757,40 @@ function update(dt, t) {
   vel.copy(forward).multiplyScalar(iy).addScaledVector(rightV, ix).multiplyScalar(speed * dt);
   const moving = (inMag > 0.05);
   if (moving) {
-    const nx = player.position.x + vel.x, nz = player.position.z + vel.z;
-    if (Math.hypot(nx, nz) < 8.8) { player.position.x = nx; player.position.z = nz; } // 平地内に制限
+    let nx = player.position.x + vel.x, nz = player.position.z + vel.z;
+    // マップ境界（円）
+    const rr = Math.hypot(nx, nz);
+    if (rr > 9.0) { nx = nx / rr * 9.0; nz = nz / rr * 9.0; }
+    // 障害物から押し出し（円コリジョン）
+    const PR = 0.55;
+    for (const o of obstacles) {
+      const dx = nx - o.x, dz = nz - o.z, d = Math.hypot(dx, dz), min = o.r + PR;
+      if (d < min && d > 1e-4) { nx = o.x + dx / d * min; nz = o.z + dz / d * min; }
+    }
+    player.position.x = nx; player.position.z = nz;
     // 向き：画面上での左右と前後
-    const screenRight = ix, screenFwd = iy;
-    if (Math.abs(screenRight) > 0.0005) facingFlip = screenRight < 0;
-    lastBack = screenFwd > Math.abs(screenRight) * 0.6; // 奥向き=背面
+    if (Math.abs(ix) > 0.0005) facingFlip = ix < 0;
+    lastBack = iy > Math.abs(ix) * 0.6; // 奥向き=背面
     walkAnim += dt * (dash ? 13 : 9);
-    const fr = 1 + (Math.floor(walkAnim) % 2); // 1,2 交互
-    setFrame(fr, lastBack, facingFlip);
+    setFrame(1 + (Math.floor(walkAnim) % 2), lastBack, facingFlip);
+    // 足音
+    stepTimer -= dt;
+    if (stepTimer <= 0) { Audio.sfx('step'); stepTimer = dash ? 0.22 : 0.34; }
+    // 遭遇判定（草むらゾーン内）
+    checkEncounter(dt, nx, nz, dash);
   } else {
     walkAnim = 0;
     setFrame(0, lastBack, facingFlip);
   }
+ } // フィールド時のみ入力/移動
   player.position.y = 2.4 + Math.sin(t * 2.2) * 0.04; // 待機の浮遊
   player.rotation.y = camYaw; // 常にカメラを向くビルボード
   playerBlob.position.set(player.position.x, 0.42, player.position.z);
+
+  // --- NPCのビルボード/待機 + 交互作用ターゲット ---
+  for (const n of npcs) { n.mesh.rotation.y = camYaw; n.mesh.position.y = 2.3 + Math.sin(t * 1.8 + n.wanderT) * 0.05; }
+  nearTarget = findInteract();
+  updatePrompt();
 
   // --- カメラ追従 ---
   camTarget.lerp(tmp.set(player.position.x, 1.4, player.position.z), 1 - Math.pow(0.001, dt));
@@ -571,15 +817,22 @@ function update(dt, t) {
   // 太陽ターゲットをプレイヤー付近に
   sun.target.position.set(player.position.x, 0, player.position.z);
   applyTimeOfDay(timeOfDay);
+  if (Audio.audioReady()) Audio.setMood(dayNightMood());
 }
 
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
-  update(dt, t);
+  if (gameState === 'battle') { if (battle.isActive()) battle.update(dt, t); }
+  else update(dt, t);
+  updateDialogue(dt);
+  gradePass.uniforms.uTime.value = (t * 9) % 100 + 1; // グレインは常時更新
   composer.render();
 }
+
+// 起動時にエリア名を表示
+setTimeout(() => showArea('街の広場', 'TOWN SQUARE'), 600);
 
 // 起動
 applyTimeOfDay(timeOfDay);

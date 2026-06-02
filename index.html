@@ -71,12 +71,85 @@
     #panel.collapsed .title::after { content: ' ▸'; }
     #panel:not(.collapsed) .title::after { content: ' ▾'; }
 
+    /* ===== ゲームUI共通フォント ===== */
+    .gfont { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+    /* 対話ボックス */
+    #dialogue {
+      position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 14;
+      width: min(680px, 92vw); background: linear-gradient(180deg, rgba(18,22,38,.92), rgba(10,12,22,.94));
+      border: 2px solid rgba(255,210,130,.5); border-radius: 12px; padding: 14px 18px 16px;
+      color: #f2ecdc; box-shadow: 0 10px 40px rgba(0,0,0,.6); display: none; backdrop-filter: blur(6px);
+    }
+    #dlgName { font-size: 13px; font-weight: 700; color: #ffd27a; letter-spacing: .1em; margin-bottom: 6px; }
+    #dlgText { font-size: 15px; line-height: 1.7; min-height: 3.4em; white-space: pre-wrap; }
+    #dlgHint { position: absolute; right: 16px; bottom: 8px; color: #ffd27a; font-size: 14px; animation: bob 1s infinite; }
+    @keyframes bob { 0%,100%{ transform: translateY(0);} 50%{ transform: translateY(3px);} }
+
+    /* モバイル決定ボタン */
+    #btnA {
+      position: fixed; right: 22px; bottom: 120px; z-index: 9; width: 78px; height: 78px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.3); color: #1a1208; font-weight: 800; font-size: 14px; letter-spacing: .08em;
+      background: radial-gradient(circle at 38% 34%, #ffe6a8, #e0a64e); box-shadow: 0 4px 16px rgba(0,0,0,.5);
+      display: none; pointer-events: auto; -webkit-user-select: none; user-select: none;
+    }
+    #btnA:active { transform: scale(.94); }
+    #btnA.show { display: block; }
+
+    /* デスクトップ用 交互作用ヒント */
+    #hint {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 11;
+      padding: 7px 16px; border-radius: 20px; background: rgba(10,12,22,.7); border: 1px solid rgba(255,210,130,.4);
+      color: #f2ecdc; font-size: 13px; letter-spacing: .06em; pointer-events: none; opacity: 0; transition: opacity .2s;
+      backdrop-filter: blur(6px);
+    }
+    @media (pointer: coarse) { #hint { display: none; } }
+
+    /* エリア名トースト */
+    #areaToast {
+      position: fixed; left: 50%; top: 24%; transform: translateX(-50%); z-index: 12;
+      color: #f2ecdc; font-size: 24px; letter-spacing: .22em; font-weight: 700; text-align: center;
+      text-shadow: 0 3px 14px rgba(0,0,0,.9); opacity: 0; transition: opacity .6s ease; pointer-events: none;
+    }
+    #areaToast .small { display: block; font-size: 12px; letter-spacing: .3em; opacity: .7; margin-top: 6px; }
+
+    /* 画面フラッシュ/トランジション */
+    #flash { position: fixed; inset: 0; z-index: 18; background: #fff; opacity: 0; pointer-events: none; transition: opacity .18s ease; }
+
+    /* バトルUI */
+    #battle { position: fixed; inset: 0; z-index: 13; display: none; pointer-events: none; }
+    #battle .panel-box { position: absolute; background: linear-gradient(180deg, rgba(18,22,38,.92), rgba(10,12,22,.94));
+      border: 2px solid rgba(255,210,130,.45); border-radius: 12px; color: #f2ecdc; box-shadow: 0 8px 30px rgba(0,0,0,.6); }
+    #bEnemy { top: 18px; left: 50%; transform: translateX(-50%); padding: 8px 16px; min-width: 220px; text-align: center; }
+    #bEnemy .nm { font-size: 14px; font-weight: 700; color: #ff9a8a; letter-spacing: .08em; }
+    #bMsg { top: 64px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 14px; min-width: 260px; text-align: center; opacity: 0; transition: opacity .15s; }
+    #bParty { right: 18px; bottom: 120px; padding: 10px 14px; font-size: 13px; min-width: 170px; }
+    #bParty .nm { font-weight: 700; color: #9fd2ff; margin-bottom: 4px; letter-spacing: .06em; }
+    .bar { height: 9px; border-radius: 5px; background: rgba(255,255,255,.14); overflow: hidden; margin: 3px 0 7px; }
+    .bar > i { display: block; height: 100%; transition: width .35s ease; }
+    .bar.hp > i { background: linear-gradient(90deg,#3ad17a,#7ef0a0); }
+    .bar.sp > i { background: linear-gradient(90deg,#3a9ad1,#7ecbf0); }
+    .bar.ehp > i { background: linear-gradient(90deg,#d13a4a,#f07e8a); }
+    #bMenu { left: 18px; bottom: 18px; padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; pointer-events: auto; }
+    #bMenu button { font-family: inherit; font-size: 14px; padding: 12px 10px; min-width: 120px; cursor: pointer;
+      background: rgba(40,46,66,.9); color: #f2ecdc; border: 1px solid rgba(255,210,130,.35); border-radius: 8px; letter-spacing: .06em; }
+    #bMenu button:hover, #bMenu button.sel { background: rgba(255,210,130,.22); border-color: #ffd27a; }
+    #bMenu button:disabled { opacity: .4; cursor: default; }
+    .dmgNum { position: fixed; z-index: 15; font-family: ui-monospace, monospace; font-weight: 800; font-size: 26px;
+      color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.8); pointer-events: none; }
+    .dmgNum.crit { color: #ffd23a; font-size: 32px; }
+    .dmgNum.heal { color: #7ef0a0; }
+    @keyframes floatUp { 0%{ transform: translateY(0); opacity: 1;} 100%{ transform: translateY(-46px); opacity: 0;} }
+
     /* スマホ向け調整 */
     @media (pointer: coarse), (max-width: 720px) {
       #ui .keys { display: none; }
       #panel { width: 170px; font-size: 12px; padding: 10px 12px; }
       #panel input[type=range] { width: 78px; }
       body.touch #joyBase, body.touch #touchHint { display: block; }
+      #bMenu button { min-width: 96px; font-size: 13px; padding: 14px 8px; }
+      #dlgText { font-size: 14px; }
+      #bParty { bottom: 210px; }
     }
   </style>
 </head>
@@ -86,7 +159,8 @@
     <div class="sub">Three.js · Octopath-style diorama</div>
     <div class="keys">
       移動 <b>WASD</b> / <b>方向キー</b> &nbsp;·&nbsp; ダッシュ <b>Shift</b><br/>
-      カメラ回転 <b>Q</b> / <b>E</b> &nbsp;·&nbsp; ズーム <b>マウスホイール</b>
+      カメラ回転 <b>Q</b> / <b>E</b> &nbsp;·&nbsp; ズーム <b>ホイール</b><br/>
+      話す / 調べる <b>Space</b> / <b>F</b> &nbsp;·&nbsp; 草むらでまもの出現
     </div>
   </div>
 
@@ -102,6 +176,42 @@
 
   <div id="joyBase"><div id="joyKnob"></div></div>
   <div id="touchHint">左: 移動（強く倒すとダッシュ）<br/>右: ドラッグで視点 / 2本指でズーム</div>
+
+  <button id="btnA" class="gfont">話す</button>
+  <div id="hint" class="gfont"></div>
+
+  <div id="areaToast" class="gfont"></div>
+
+  <!-- 対話ボックス -->
+  <div id="dialogue" class="gfont">
+    <div id="dlgName"></div>
+    <div id="dlgText"></div>
+    <div id="dlgHint">▼</div>
+  </div>
+
+  <!-- バトルUI -->
+  <div id="battle" class="gfont">
+    <div id="bEnemy" class="panel-box">
+      <div class="nm" id="bEnemyName">まもの</div>
+      <div class="bar ehp"><i id="bEnemyHp" style="width:100%"></i></div>
+    </div>
+    <div id="bMsg" class="panel-box"></div>
+    <div id="bParty" class="panel-box">
+      <div class="nm">旅人</div>
+      <div>HP <span id="bHpTxt"></span></div>
+      <div class="bar hp"><i id="bHpBar" style="width:100%"></i></div>
+      <div>SP <span id="bSpTxt"></span></div>
+      <div class="bar sp"><i id="bSpBar" style="width:100%"></i></div>
+    </div>
+    <div id="bMenu" class="panel-box">
+      <button data-act="attack">たたかう</button>
+      <button data-act="skill">スキル</button>
+      <button data-act="item">アイテム</button>
+      <button data-act="flee">にげる</button>
+    </div>
+  </div>
+
+  <div id="flash"></div>
 
   <div id="loading">LOADING…</div>
 
