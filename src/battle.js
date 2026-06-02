@@ -70,6 +70,32 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
   let edata = null, eHP = 0, eMax = 0, stats = null;
   let shakeT = 0;
 
+  // ---- カメラ操作（ドラッグで旋回 / ピンチでズーム、PCもタッチも） ----
+  let bYaw = 0, bDist = 13;
+  const BHEIGHT = 4.2;
+  const pointers = new Map();
+  let bPinch = null;
+  const inMenu = el => !!(el && el.closest && el.closest('#bMenu, #btnA'));
+  function pDown(e) { if (!active || inMenu(e.target)) return; pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); }
+  function pMove(e) {
+    if (!active || !pointers.has(e.pointerId)) return;
+    const p = pointers.get(e.pointerId);
+    const dx = e.clientX - p.x; p.x = e.clientX; p.y = e.clientY;
+    if (pointers.size >= 2) {
+      const a = [...pointers.values()];
+      const d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+      if (bPinch != null) bDist = THREE.MathUtils.clamp(bDist - (d - bPinch) * 0.04, 8, 20);
+      bPinch = d;
+    } else {
+      bYaw = THREE.MathUtils.clamp(bYaw - dx * 0.006, -0.85, 0.85);
+    }
+  }
+  function pUp(e) { pointers.delete(e.pointerId); if (pointers.size < 2) bPinch = null; }
+  addEventListener('pointerdown', pDown);
+  addEventListener('pointermove', pMove);
+  addEventListener('pointerup', pUp);
+  addEventListener('pointercancel', pUp);
+
   function updateBars() {
     enemyHpBar.style.width = Math.max(0, eHP / eMax * 100) + '%';
     hpBar.style.width = Math.max(0, stats.hp / stats.maxHp * 100) + '%';
@@ -147,18 +173,21 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
     await delay(420);
   }
 
-  let active = false, baseTime = 0;
+  let active = false;
   // 毎フレーム呼ばれる（メインループから）
   function update(dt, t) {
-    baseTime = t;
     const sway = Math.sin(t * 2) * 0.05;
-    hero.position.y = 2.4 + sway;
-    enemy.position.y = edata ? edata.y + Math.sin(t * 1.6) * (edata.sprite === 'bat' ? 0.35 : 0.12) : enemy.position.y;
+    hero.position.y = 2.4 + sway; hero.rotation.y = bYaw;        // 常にカメラを向く
+    if (edata) enemy.position.y = edata.y + Math.sin(t * 1.6) * (edata.sprite === 'bat' ? 0.35 : 0.12);
+    enemy.rotation.y = bYaw;
     // ヒットの揺れ
-    if (shakeT > 0) { shakeT -= dt; cam.position.x = Math.sin(shakeT * 80) * shakeT * 1.2; }
-    else cam.position.x = 0;
+    let shx = 0;
+    if (shakeT > 0) { shakeT -= dt; shx = Math.sin(shakeT * 80) * shakeT * 1.2; }
+    // 旋回カメラ（ドラッグ/ピンチで bYaw, bDist が変わる）
+    const h = Math.cos(0.32);
+    cam.position.set(Math.sin(bYaw) * bDist * h + shx, BHEIGHT, Math.cos(bYaw) * bDist * h);
     cam.lookAt(0, 2.2, 0);
-    bokeh.uniforms['focus'].value = 12;
+    bokeh.uniforms['focus'].value = bDist;
   }
 
   async function start(enemyType, heroStats) {
@@ -168,6 +197,7 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
     enemyMat.needsUpdate = true;
     enemy.scale.set(edata.scale, edata.scale, 1);
     enemyNameEl.textContent = edata.name;
+    bYaw = 0; bDist = 13; pointers.clear(); bPinch = null;
     updateBars(); setMenu(false); clearMsg();
 
     // パスをバトルシーンへ

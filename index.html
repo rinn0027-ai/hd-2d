@@ -135,6 +135,8 @@
       background: rgba(40,46,66,.9); color: #f2ecdc; border: 1px solid rgba(255,210,130,.35); border-radius: 8px; letter-spacing: .06em; }
     #bMenu button:hover, #bMenu button.sel { background: rgba(255,210,130,.22); border-color: #ffd27a; }
     #bMenu button:disabled { opacity: .4; cursor: default; }
+    #bHint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); font-size: 11px;
+      color: #d8d2c4; opacity: .6; letter-spacing: .06em; text-shadow: 0 2px 6px rgba(0,0,0,.8); pointer-events: none; }
     .dmgNum { position: fixed; z-index: 15; font-family: ui-monospace, monospace; font-weight: 800; font-size: 26px;
       color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.8); pointer-events: none; }
     .dmgNum.crit { color: #ffd23a; font-size: 32px; }
@@ -209,6 +211,7 @@
       <button data-act="item">アイテム</button>
       <button data-act="flee">にげる</button>
     </div>
+    <div id="bHint">ドラッグで視点をまわす / ピンチでズーム</div>
   </div>
 
   <div id="flash"></div>
