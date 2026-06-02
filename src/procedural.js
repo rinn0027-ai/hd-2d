@@ -253,6 +253,72 @@ export function glowSprite(size = 64) {
   return tex;
 }
 
+// ---- 花びら（天候） ----
+export function petalSprite(size = 16) {
+  const c = makeCanvas(size), g = c.getContext('2d');
+  g.clearRect(0, 0, size, size);
+  g.fillStyle = '#ffc6dd';
+  g.beginPath(); g.ellipse(size / 2, size / 2, size * 0.42, size * 0.26, Math.PI / 5, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#ff9fc4';
+  g.beginPath(); g.ellipse(size / 2, size * 0.6, size * 0.22, size * 0.13, Math.PI / 5, 0, Math.PI * 2); g.fill();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true; return tex;
+}
+
+// ---- 雨だれ ----
+export function rainSprite(size = 16) {
+  const c = makeCanvas(size), g = c.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 0, size);
+  grd.addColorStop(0, 'rgba(200,225,255,0)'); grd.addColorStop(0.5, 'rgba(200,225,255,.7)'); grd.addColorStop(1, 'rgba(220,240,255,0)');
+  g.fillStyle = grd; g.fillRect(size / 2 - 1, 0, 2, size);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true; return tex;
+}
+
+// ---- 花（地面ビルボード） ----
+export function flowerSprite(size = 48, color = '#ffd23a') {
+  const c = makeCanvas(size), g = c.getContext('2d');
+  g.imageSmoothingEnabled = false; g.clearRect(0, 0, size, size);
+  const cx = size / 2;
+  // 茎
+  px(g, cx - 1, size * 0.4, 2, size * 0.6, '#3f7a3a');
+  // 花弁
+  g.fillStyle = color;
+  for (let i = 0; i < 5; i++) {
+    const a = i / 5 * Math.PI * 2;
+    g.beginPath(); g.ellipse(cx + Math.cos(a) * 7, size * 0.32 + Math.sin(a) * 7, 4, 5, a, 0, Math.PI * 2); g.fill();
+  }
+  g.fillStyle = '#fff4c0'; g.beginPath(); g.arc(cx, size * 0.32, 3.5, 0, Math.PI * 2); g.fill();
+  const tex = new THREE.CanvasTexture(c); tex.magFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true; return tex;
+}
+
+// ---- 岩 ----
+export function rockSprite(size = 64) {
+  const c = makeCanvas(size), g = c.getContext('2d');
+  g.imageSmoothingEnabled = false; g.clearRect(0, 0, size, size);
+  const cx = size / 2, base = size - 8;
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(cx, base, 22, 5, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#7a7e86';
+  g.beginPath(); g.moveTo(cx - 20, base); g.lineTo(cx - 14, base - 18); g.lineTo(cx + 2, base - 24); g.lineTo(cx + 18, base - 14); g.lineTo(cx + 22, base); g.closePath(); g.fill();
+  g.fillStyle = '#9aa0a8'; g.beginPath(); g.moveTo(cx - 14, base - 18); g.lineTo(cx + 2, base - 24); g.lineTo(cx - 2, base - 12); g.closePath(); g.fill();
+  g.fillStyle = '#5e6168'; px(g, cx + 8, base - 12, 8, 12, '#5e6168');
+  const tex = new THREE.CanvasTexture(c); tex.magFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true; return tex;
+}
+
+// ---- 雲（空ドーム用のタイル可能ノイズ） ----
+export function cloudTexture(size = 256) {
+  const c = makeCanvas(size), g = c.getContext('2d');
+  const img = g.createImageData(size, size);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    // タイル可能なfbm（周期境界で繋ぐ）
+    const n = fbm(x * 0.02, y * 0.02, 5);
+    const a = THREE.MathUtils.clamp((n - 0.52) * 3.2, 0, 1);
+    const i = (y * size + x) * 4;
+    img.data[i] = 255; img.data[i + 1] = 255; img.data[i + 2] = 255; img.data[i + 3] = a * 255;
+  }
+  g.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c); tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true; return tex;
+}
+
 // ---- NPCの配色バリエーション ----
 export const NPC_PALETTES = {
   villager: { cloak: '#7a8c3a', cloakBack: '#637030', cloakSh: '#4c5a26', hat: '#b06b3a', hatSh: '#854f2a', hatTop: '#c98a52', tunic: '#cdb27a', belt: '#5a3b22' },

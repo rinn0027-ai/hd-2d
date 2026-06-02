@@ -47,6 +47,49 @@ scene.add(sun.target);
 const ambient = new THREE.AmbientLight(0x405070, 0.3);
 scene.add(ambient);
 
+// ============================================================ 空ドーム（グラデ + 太陽 + 流雲）
+const skyUniforms = {
+  uTop: { value: new THREE.Color(0x2a4a8a) },
+  uMid: { value: new THREE.Color(0x9bb6e0) },
+  uBottom: { value: new THREE.Color(0xcfe0f0) },
+  uSunDir: { value: new THREE.Vector3(0.3, 0.6, 0.4) },
+  uSunColor: { value: new THREE.Color(0xffe8c2) },
+  uClouds: { value: P.cloudTexture(256) },
+  uCloudTint: { value: new THREE.Color(0xffffff) },
+  uTime: { value: 0 },
+};
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(280, 32, 16),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false, uniforms: skyUniforms,
+    vertexShader: /* glsl */`
+      varying vec3 vDir;
+      void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: /* glsl */`
+      varying vec3 vDir; uniform vec3 uTop,uMid,uBottom,uSunDir,uSunColor,uCloudTint;
+      uniform sampler2D uClouds; uniform float uTime;
+      void main(){
+        float h = clamp(vDir.y*0.5+0.5, 0.0, 1.0);
+        vec3 col = mix(uBottom, uMid, smoothstep(0.45,0.62,h));
+        col = mix(col, uTop, smoothstep(0.62,0.95,h));
+        // 太陽
+        float sd = max(dot(normalize(vDir), normalize(uSunDir)), 0.0);
+        col += uSunColor * pow(sd, 600.0) * 2.5;            // ディスク
+        col += uSunColor * pow(sd, 8.0) * 0.35;             // ハロー
+        // 雲（方向を平面に投影してスクロール）
+        if (vDir.y > 0.02) {
+          vec2 uv = vDir.xz / (vDir.y + 0.25) * 0.5;
+          float c = texture2D(uClouds, uv * 0.6 + vec2(uTime*0.006, uTime*0.003)).a;
+          c = c * smoothstep(0.05, 0.4, vDir.y);
+          col = mix(col, uCloudTint, c * 0.7);
+        }
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  })
+);
+sky.renderOrder = -1;
+scene.add(sky);
+
 // ============================================================ テクスチャ生成
 const grassTex = P.grassTexture(); grassTex.repeat.set(1, 1);
 const dirtTex = P.dirtTexture();
@@ -142,6 +185,10 @@ const waterMat = new THREE.ShaderMaterial({
       float spark = pow(noise(uv*5.0 + uTime*0.9), 22.0) * 3.0;
       col += vec3(1.0,0.95,0.8) * spark;
       col = mix(col, uSky, 0.18);
+      // 縁の泡
+      float edge = min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y));
+      float foam = smoothstep(0.05, 0.0, edge) * (0.55 + 0.45*sin(uTime*3.0 + (vUv.x+vUv.y)*45.0));
+      col = mix(col, vec3(0.92,0.97,1.0), clamp(foam,0.0,1.0)*0.55);
       gl_FragColor = vec4(col, 0.82);
     }`
 });
@@ -149,6 +196,39 @@ const water = new THREE.Mesh(new THREE.PlaneGeometry(11, 7, 40, 28), waterMat);
 water.rotation.x = -Math.PI / 2;
 water.position.set(-7, 0.28, -7);
 worldGroup.add(water);
+
+// ============================================================ 地表の薄雾（ボリューム感）
+const mistUniforms = {
+  uTime: { value: 0 },
+  uColor: { value: new THREE.Color(0xdfe8f5) },
+  uStrength: { value: 0.45 },
+};
+const mist = new THREE.Mesh(
+  new THREE.PlaneGeometry(46, 46, 1, 1),
+  new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, uniforms: mistUniforms,
+    vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
+    fragmentShader: /* glsl */`
+      varying vec2 vUv; uniform float uTime,uStrength; uniform vec3 uColor;
+      float hash(vec2 p){return fract(sin(dot(p,vec2(41.3,289.1)))*43758.5);}
+      float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+        return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+      float fbm(vec2 p){float s=0.,a=.5;for(int i=0;i<5;i++){s+=a*noise(p);p*=2.;a*=.5;}return s;}
+      void main(){
+        vec2 uv = vUv*4.0;
+        float n = fbm(uv + vec2(uTime*0.04, uTime*0.02));
+        n = smoothstep(0.35, 0.9, n);
+        // 中央ほど薄く、外周で濃く（縁を隠す）
+        float edge = smoothstep(0.2, 0.5, distance(vUv, vec2(0.5)));
+        float a = n * uStrength * (0.4 + edge);
+        gl_FragColor = vec4(uColor, a);
+      }`,
+  })
+);
+mist.rotation.x = -Math.PI / 2;
+mist.position.set(0, 0.75, 0);
+mist.renderOrder = 2;
+scene.add(mist);
 
 // ============================================================ 木（ビルボード）
 const treeTex = P.treeSprite();
@@ -224,6 +304,8 @@ grassInst.instanceMatrix.needsUpdate = true;
 grassInst.frustumCulled = false; // 頂点をシェーダーで動かすため
 worldGroup.add(grassInst);
 
+const flatBillboards = []; // カメラY軸ビルボードする装飾小物（花・岩）
+
 // ============================================================ ランタン（点光源 + glowでbloom）
 const glowTex = P.glowSprite();
 const lampGlowMat = new THREE.SpriteMaterial({ map: glowTex, color: 0xffd88a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
@@ -279,6 +361,56 @@ fireflies.position.y = 0.4;
 fireflies.frustumCulled = false;
 worldGroup.add(fireflies);
 
+// ============================================================ 天候（花びら / 雨）
+function makeWeather(tex, count, opts) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(count * 3), seed = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    pos[i * 3] = (Math.random() - 0.5) * 30;
+    pos[i * 3 + 1] = Math.random() * 18;
+    pos[i * 3 + 2] = (Math.random() - 0.5) * 30;
+    seed[i] = Math.random() * 100;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { uTime: { value: 0 }, uMap: { value: tex }, uSize: { value: opts.size * renderer.getPixelRatio() }, uFall: { value: opts.fall }, uSway: { value: opts.sway } },
+    vertexShader: /* glsl */`
+      attribute float aSeed; uniform float uTime,uSize,uFall,uSway; varying float vR;
+      void main(){
+        vec3 p = position;
+        float life = mod(uTime*uFall + aSeed*7.0, 18.0);
+        p.y = 18.0 - life;                                   // 落下
+        p.x += sin(uTime*0.8 + aSeed)*uSway + uTime*uSway*0.3;
+        p.z += cos(uTime*0.6 + aSeed*1.7)*uSway;
+        p.x = mod(p.x + 15.0, 30.0) - 15.0;
+        p.z = mod(p.z + 15.0, 30.0) - 15.0;
+        vR = aSeed + uTime*2.0;
+        vec4 mv = modelViewMatrix * vec4(p,1.0);
+        gl_PointSize = uSize / -mv.z;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */`
+      uniform sampler2D uMap; varying float vR;
+      void main(){
+        vec2 uv = gl_PointCoord - 0.5;
+        float s = sin(vR), c = cos(vR);
+        uv = mat2(c,-s,s,c) * uv + 0.5;                       // 回転
+        vec4 t = texture2D(uMap, uv);
+        if (t.a < 0.05) discard;
+        gl_FragColor = t;
+      }`,
+  });
+  const pts = new THREE.Points(geo, mat);
+  pts.frustumCulled = false; pts.visible = false;
+  pts.position.y = 0.4; scene.add(pts);
+  return pts;
+}
+const petals = makeWeather(P.petalSprite(), 320, { size: 26, fall: 1.3, sway: 1.1 });
+const rain = makeWeather(P.rainSprite(), 600, { size: 34, fall: 7.0, sway: 0.05 });
+let weather = 'none'; // 'none' | 'petals' | 'rain'
+
 // ============================================================ プレイヤー（ドット絵ビルボード）
 const sheet = P.characterSpriteSheet();
 const charMat = new THREE.MeshBasicMaterial({ map: sheet.texture.clone(), transparent: true, alphaTest: 0.4, fog: true });
@@ -322,11 +454,19 @@ function buildHouse(x, z, rot = 0) {
   roof.position.y = 4.5; roof.rotation.y = Math.PI / 4; roof.castShadow = true; grp.add(roof);
   const door = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.8, 0.2), woodMat);
   door.position.set(0, 1.3, 1.85); grp.add(door);
+  // 夜に光る窓（emissive）
+  const winMat = new THREE.MeshStandardMaterial({ color: 0x2a2418, emissive: 0xffb84a, emissiveIntensity: 0, roughness: 0.5 });
+  for (const wx of [-1.3, 1.3]) {
+    const w = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.15), winMat);
+    w.position.set(wx, 2.2, 1.85); grp.add(w);
+  }
+  emissiveWindows.push(winMat);
   grp.position.set(x, 0.4, z); grp.rotation.y = rot;
   worldGroup.add(grp);
   addObstacle(x, z, 2.6);
   return grp;
 }
+const emissiveWindows = [];
 buildHouse(5.5, 5.0, -0.4);
 
 // ============================================================ NPC（ビルボード + 対話）
@@ -370,6 +510,33 @@ const encounterZones = [
   { x: 5, z: -6, r: 3.5 }, { x: -6, z: 4, r: 3.2 }, { x: 6, z: 6, r: 3.0 }, { x: -5, z: -5, r: 3.2 },
 ];
 
+// ============================================================ 花・岩（装飾ビルボード）— 障害物が出揃ってから配置
+function freeGround(x, z) {
+  if (Math.hypot(x, z) > 8.6) return false;
+  if (Math.abs(z) < 1.6) return false;                            // 小道
+  if (x > -12.5 && x < -1.5 && z > -10.5 && z < -3.5) return false; // 池
+  for (const o of obstacles) if ((x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + 0.7) ** 2) return false;
+  return true;
+}
+const flowerColors = ['#ffd23a', '#ff7a9c', '#c08aff', '#ff9a4a', '#ffffff'];
+const flowerMatCache = flowerColors.map(c => new THREE.MeshBasicMaterial({ map: P.flowerSprite(48, c), transparent: true, alphaTest: 0.5, fog: true }));
+for (let i = 0, tries = 0; i < 44 && tries < 400; tries++) {
+  const x = (Math.random() - 0.5) * 17, z = (Math.random() - 0.5) * 17;
+  if (!freeGround(x, z)) continue;
+  const mat = flowerMatCache[Math.floor(Math.random() * flowerMatCache.length)];
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), mat);
+  m.position.set(x, 0.95, z); worldGroup.add(m); flatBillboards.push(m); i++;
+}
+const rockMat = new THREE.MeshBasicMaterial({ map: P.rockSprite(), transparent: true, alphaTest: 0.5, fog: true });
+for (let i = 0, tries = 0; i < 12 && tries < 200; tries++) {
+  const x = (Math.random() - 0.5) * 17, z = (Math.random() - 0.5) * 17;
+  if (!freeGround(x, z)) continue;
+  const s = 1.0 + Math.random() * 0.7;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.8 * s, 1.8 * s), rockMat);
+  m.position.set(x, 0.4 + 0.9 * s, z); worldGroup.add(m); flatBillboards.push(m); i++;
+  addObstacle(x, z, 0.5);
+}
+
 // ============================================================ ポストプロセス
 const composer = new EffectComposer(renderer);
 const renderPass = new RenderPass(scene, camera);
@@ -381,24 +548,37 @@ composer.addPass(bokeh);
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.65, 0.5, 0.82);
 composer.addPass(bloom);
 
-// ビネット + 軽いフィルムグレイン + 彩度
+// 色収差 + 分離色調 + ビネット + フィルムグレイン + 彩度
 const gradePass = new ShaderPass({
   uniforms: {
     tDiffuse: { value: null }, uTime: { value: 0 },
-    uVignette: { value: 1.15 }, uSat: { value: 1.12 },
+    uVignette: { value: 1.15 }, uSat: { value: 1.16 },
+    uAberr: { value: 1.0 },     // 色収差量(0で無効)
+    uSplit: { value: 1.0 },     // 分離色調量
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
   fragmentShader: /* glsl */`
-    varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime,uVignette,uSat;
+    varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime,uVignette,uSat,uAberr,uSplit;
     void main(){
-      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      vec2 d = vUv-0.5;
+      float r2 = dot(d,d);
+      // 色収差（周辺ほどRGBをずらす）
+      vec2 off = d * r2 * 0.012 * uAberr;
+      vec3 c;
+      c.r = texture2D(tDiffuse, vUv + off).r;
+      c.g = texture2D(tDiffuse, vUv).g;
+      c.b = texture2D(tDiffuse, vUv - off).b;
       // 彩度
       float l = dot(c, vec3(0.299,0.587,0.114));
       c = mix(vec3(l), c, uSat);
+      // 分離色調（影=寒色 / ハイライト=暖色）
+      vec3 shadowT = vec3(0.86, 0.95, 1.10);
+      vec3 highT   = vec3(1.10, 1.02, 0.88);
+      vec3 toned = c * mix(shadowT, highT, smoothstep(0.15, 0.85, l));
+      c = mix(c, toned, uSplit);
       // ビネット
-      vec2 d = vUv-0.5;
-      float v = smoothstep(0.85, 0.2, dot(d,d)*uVignette);
-      c *= mix(0.55, 1.0, v);
+      float v = smoothstep(0.85, 0.2, r2*uVignette);
+      c *= mix(0.5, 1.0, v);
       // グレイン
       float g = fract(sin(dot(vUv*uTime, vec2(12.99,78.23)))*43758.5);
       c += (g-0.5)*0.025;
@@ -632,14 +812,22 @@ addEventListener('touchcancel', onTouchEnd);
 
 // ============================================================ UI
 const $ = id => document.getElementById(id);
-let bloomOn = true, dofOn = true, pixelOn = false;
+let bloomOn = true, dofOn = true, pixelOn = false, mistOn = true, aberrOn = true;
+const WEATHERS = ['none', 'petals', 'rain'];
+const WEATHER_LABEL = { none: 'OFF', petals: '花びら', rain: '雨' };
 function syncUI() {
   $('bloomV').textContent = bloomOn ? 'ON' : 'OFF';
   $('dofV').textContent = dofOn ? 'ON' : 'OFF';
   $('pxV').textContent = pixelOn ? 'ON' : 'OFF';
+  $('mistV').textContent = mistOn ? 'ON' : 'OFF';
+  $('aberrV').textContent = aberrOn ? 'ON' : 'OFF';
+  $('weatherV').textContent = WEATHER_LABEL[weather];
   $('bloomTog').style.opacity = bloomOn ? 1 : 0.4;
   $('dofTog').style.opacity = dofOn ? 1 : 0.4;
   $('pxTog').style.opacity = pixelOn ? 1 : 0.4;
+  $('mistTog').style.opacity = mistOn ? 1 : 0.4;
+  $('aberrTog').style.opacity = aberrOn ? 1 : 0.4;
+  $('weatherTog').style.opacity = weather === 'none' ? 0.4 : 1;
 }
 $('bloomStr').value = bloom.strength;
 $('dofAp').value = 1.4;
@@ -647,6 +835,14 @@ $('timeOfDay').value = 0.5;
 $('bloomTog').onclick = () => { bloomOn = !bloomOn; bloom.enabled = bloomOn; syncUI(); };
 $('dofTog').onclick = () => { dofOn = !dofOn; bokeh.enabled = dofOn; syncUI(); };
 $('pxTog').onclick = () => { pixelOn = !pixelOn; renderer.domElement.style.imageRendering = pixelOn ? 'pixelated' : 'auto'; onResize(); syncUI(); };
+$('mistTog').onclick = () => { mistOn = !mistOn; mist.visible = mistOn; syncUI(); };
+$('aberrTog').onclick = () => { aberrOn = !aberrOn; gradePass.uniforms.uAberr.value = aberrOn ? 1 : 0; syncUI(); };
+$('weatherTog').onclick = () => {
+  weather = WEATHERS[(WEATHERS.indexOf(weather) + 1) % WEATHERS.length];
+  petals.visible = weather === 'petals';
+  rain.visible = weather === 'rain';
+  syncUI();
+};
 $('bloomStr').oninput = e => bloom.strength = +e.target.value;
 $('dofAp').oninput = e => { bokeh.uniforms['aperture'].value = +e.target.value * 0.001; };
 let timeOfDay = 0.5;
@@ -687,6 +883,20 @@ function applyTimeOfDay(t) {
   fireflies.visible = dayAmt < 0.55;
   // キャラとビルボードの環境トーン
   charMat.color.copy(cA.set(a.sky).lerp(cB.set(b.sky), k)).multiplyScalar(0.4).addScalar(0.62);
+
+  // --- 空ドーム ---
+  const sCol = lerpC(a.sky, b.sky);                 // cA を返す
+  skyUniforms.uMid.value.copy(sCol);
+  skyUniforms.uTop.value.copy(sCol).multiplyScalar(0.5);
+  skyUniforms.uBottom.value.copy(scene.fog.color);
+  skyUniforms.uSunColor.value.copy(sun.color);
+  skyUniforms.uSunDir.value.copy(sun.position).normalize();
+  skyUniforms.uCloudTint.value.set(0xffffff).lerp(sun.color, 0.5).multiplyScalar(0.45 + 0.55 * THREE.MathUtils.clamp(dayAmt, 0, 1));
+  // --- 薄雾の色 ---
+  mistUniforms.uColor.value.copy(scene.fog.color).lerp(cB.set(0xffffff), 0.5);
+  // --- 夜の窓あかり ---
+  const night = THREE.MathUtils.clamp(1 - dayAmt * 1.6, 0, 1);
+  for (const w of emissiveWindows) w.emissiveIntensity = night * 1.8;
 }
 
 // ============================================================ リサイズ
@@ -802,8 +1012,9 @@ function update(dt, t) {
   camera.position.copy(camTarget).add(cp);
   camera.lookAt(camTarget);
 
-  // --- ビルボード（木をカメラに向ける：Y軸のみ） ---
+  // --- ビルボード（木/花/岩をカメラに向ける：Y軸のみ） ---
   for (const tr of trees) tr.rotation.y = camYaw;
+  for (const b of flatBillboards) b.rotation.y = camYaw;
 
   // --- DOFのピントをプレイヤー距離に ---
   bokeh.uniforms['focus'].value = camera.position.distanceTo(player.position);
@@ -812,7 +1023,13 @@ function update(dt, t) {
   waterUniforms.uTime.value = t;
   grassU.uTime.value = t;
   ffMat.uniforms.uTime.value = t;
-  gradePass.uniforms.uTime.value = (t * 9) % 100 + 1;
+  skyUniforms.uTime.value = t;
+  mistUniforms.uTime.value = t;
+  petals.material.uniforms.uTime.value = t;
+  rain.material.uniforms.uTime.value = t;
+  // 天候の追従（プレイヤー周辺に）
+  petals.position.x = rain.position.x = player.position.x;
+  petals.position.z = rain.position.z = player.position.z;
 
   // 太陽ターゲットをプレイヤー付近に
   sun.target.position.set(player.position.x, 0, player.position.z);
