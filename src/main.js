@@ -425,13 +425,38 @@ const playerBlob = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), blobMat);
 playerBlob.rotation.x = -Math.PI / 2;
 scene.add(playerBlob);
 
+// スプライトシートの列/行（外部PNG差し替えで変わりうる）
+let spriteCols = sheet.cols, spriteRows = sheet.rows;
 function setFrame(col, back, flip) {
   const m = charMat.map;
-  m.offset.y = back ? 0 : 0.5;
-  if (flip) { m.repeat.x = -1 / sheet.cols; m.offset.x = (col + 1) / sheet.cols; }
-  else { m.repeat.x = 1 / sheet.cols; m.offset.x = col / sheet.cols; }
+  m.repeat.y = 1 / spriteRows;
+  m.offset.y = back ? 0 : (spriteRows > 1 ? 1 - 1 / spriteRows : 0);
+  if (flip) { m.repeat.x = -1 / spriteCols; m.offset.x = (col + 1) / spriteCols; }
+  else { m.repeat.x = 1 / spriteCols; m.offset.x = col / spriteCols; }
 }
 setFrame(0, false, false);
+
+// ============================================================ 外部スプライトシートの差し替え（任意）
+// assets/player.png があれば自動で読み込んで主役の絵を置き換える。
+//   レイアウト規格: 横=歩行コマ(既定3列) / 縦=向き(上段:前向き, 下段:後ろ向き の2行)
+//   透過PNG・ドット絵推奨。各コマは同サイズ。列数は ?cols= で上書き可。
+const sheetParam = new URLSearchParams(location.search);
+const customCols = parseInt(sheetParam.get('cols') || '3', 10);
+function applyExternalSheet(texture, cols, rows) {
+  texture.magFilter = THREE.NearestFilter; texture.minFilter = THREE.NearestFilter;
+  texture.colorSpace = THREE.SRGBColorSpace; texture.generateMipmaps = false;
+  texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+  charMat.map = texture; charMat.needsUpdate = true;
+  spriteCols = cols; spriteRows = rows;
+  setFrame(0, false, false);
+  console.info('[hd-2d] external player sheet loaded:', cols + 'x' + rows);
+}
+new THREE.TextureLoader().load(
+  'assets/player.png',
+  tex => applyExternalSheet(tex, customCols, 2),
+  undefined,
+  () => { /* 無ければ手続き生成のドット絵のまま */ }
+);
 
 // ============================================================ 障害物（円形コリジョン）
 // 木・池・建物などを円で近似。プレイヤーはこれらを通り抜けられない。

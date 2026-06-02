@@ -84,4 +84,11 @@ src/main.js       … シーン構築・ポストプロセス・操作・状態�
 src/procedural.js … テクスチャ/ドット絵スプライト/敵スプライトの手続き生成
 src/battle.js     … 回合制バトル（独自シーン + コマンドUI + 勝敗処理）
 src/audio.js      … Web Audio による効果音/BGM合成
+assets/           … 任意の外部スプライト素材（player.png を置くと差し替え）
 ```
+
+## 自前のドット絵に差し替える
+
+`assets/player.png`（透過PNG・ドット絵）を置くと、主役がそのスプライトに置き換わります。
+グリッド規格は [`assets/README.md`](assets/README.md) を参照（既定: 横3列の歩行 × 縦2行の前/後）。
+列数が違う場合は URL に `?cols=4` のように付けて開きます。
