@@ -191,6 +191,107 @@ export function characterSpriteSheet(pal = DEFAULT_PAL) {
   return { texture: tex, cols, rows, frameW: TW, frameH: TH };
 }
 
+// =========================================================
+//  月の魔導士（プレイヤー用・参考イラストを元にドット化）
+//  特徴: 黒髪ロング / 新月の髪飾り / 白上衣 + 紺の星空スカート /
+//        ワイドな白袖 / 新月の杖 / 青い宝石
+// =========================================================
+const MW = 40, MH = 52;
+function rr(g, x, y, w, h, r) { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); g.fill(); }
+function crescent(g, cx, cy, r, w, color, a0 = Math.PI * 0.32, a1 = Math.PI * 1.68) {
+  g.strokeStyle = color; g.lineWidth = w; g.lineCap = 'round';
+  g.beginPath(); g.arc(cx, cy, r, a0, a1); g.stroke();
+}
+
+function drawMage(g, ox, frame, back) {
+  const cx = ox + MW / 2;
+  const bob = frame === 0 ? 0 : -1;
+  const hem = frame === 1 ? 1 : (frame === 2 ? -1 : 0);
+  const y = bob;
+  const hair = '#171a2a', hairHi = '#343a55';
+  const skin = '#f1d4b6';
+  const white = '#eef3fa', whiteSh = '#ccd6e8';
+  const blue = '#2c3f7c', blueD = '#1b2a56', star = '#e3e9ff';
+  const silver = '#d6dfee', gem = '#5b8fd6', pole = '#4a4f60';
+
+  // 影
+  g.fillStyle = 'rgba(0,0,0,0.28)';
+  g.beginPath(); g.ellipse(cx, 49 + y, 12, 3.2, 0, 0, Math.PI * 2); g.fill();
+
+  // 後ろ髪（最背面・ロング）
+  g.fillStyle = hair; rr(g, cx - 14, 7 + y, 28, 41, 12);
+  g.fillStyle = hairHi; g.fillRect(cx - 11, 14 + y, 2, 28); g.fillRect(cx + 8, 16 + y, 2, 24);
+
+  // スカート（紺の星空）
+  g.fillStyle = blue;
+  g.beginPath();
+  g.moveTo(cx - 11, 30 + y); g.lineTo(cx + 11, 30 + y);
+  g.lineTo(cx + 14 + hem, 48 + y); g.lineTo(cx - 14 + hem, 48 + y); g.closePath(); g.fill();
+  g.fillStyle = blueD;
+  g.beginPath();
+  g.moveTo(cx - 11, 30 + y); g.lineTo(cx - 3, 30 + y);
+  g.lineTo(cx - 6 + hem, 48 + y); g.lineTo(cx - 14 + hem, 48 + y); g.closePath(); g.fill();
+  // 星
+  g.fillStyle = star;
+  for (const [sx, sy] of [[-8, 36], [2, 39], [7, 34], [-3, 44], [6, 45], [-9, 42], [0, 33]]) g.fillRect(cx + sx, sy + y, 1, 1);
+
+  // ワイドな白袖
+  g.fillStyle = white; rr(g, cx - 18, 21 + y, 9, 17, 4); rr(g, cx + 9, 21 + y, 9, 17, 4);
+  g.fillStyle = whiteSh; g.fillRect(cx - 18, 21 + y, 3, 17); g.fillRect(cx + 15, 21 + y, 3, 17);
+
+  // 白の上衣
+  g.fillStyle = white; rr(g, cx - 8, 19 + y, 16, 13, 5);
+  g.fillStyle = whiteSh; rr(g, cx - 8, 28 + y, 16, 4, 2);
+  // 襟元（青）+ 宝石
+  g.fillStyle = blue; g.fillRect(cx - 3, 17 + y, 6, 3);
+  g.fillStyle = gem; g.fillRect(cx - 1, 18 + y, 2, 2);
+  // 帯
+  g.fillStyle = blueD; g.fillRect(cx - 9, 30 + y, 18, 3);
+  g.fillStyle = gem; g.fillRect(cx - 1, 30 + y, 3, 3);
+
+  if (!back) {
+    // 顔
+    g.fillStyle = skin; rr(g, cx - 6, 11 + y, 12, 12, 5);
+    // 目（青）
+    g.fillStyle = '#3a5a9c'; g.fillRect(cx - 4, 16 + y, 2, 3); g.fillRect(cx + 2, 16 + y, 2, 3);
+    g.fillStyle = '#9fc0ef'; g.fillRect(cx - 4, 16 + y, 1, 1); g.fillRect(cx + 2, 16 + y, 1, 1);
+    // 前髪
+    g.fillStyle = hair; g.fillRect(cx - 7, 9 + y, 14, 5);
+    g.fillRect(cx - 7, 9 + y, 3, 12); g.fillRect(cx + 4, 9 + y, 3, 12); // 顔横の髪
+    g.fillRect(cx - 1, 9 + y, 2, 4); // 真ん中の分け目
+  } else {
+    // 背面：後頭部の髪で覆う
+    g.fillStyle = hair; rr(g, cx - 7, 9 + y, 14, 14, 5);
+    g.fillStyle = hairHi; g.fillRect(cx - 1, 11 + y, 2, 10);
+  }
+
+  // 新月の髪飾り（頭の上）
+  crescent(g, cx + 3, 8 + y, 4, 2.2, silver, Math.PI * 0.9, Math.PI * 2.05);
+  g.fillStyle = gem; g.fillRect(cx + 5, 9 + y, 2, 2);
+
+  // 新月の杖（左手側・画面左）
+  g.fillStyle = pole; g.fillRect(cx - 16, 14 + y, 2, 33);
+  crescent(g, cx - 17, 11 + y, 6, 3, silver, Math.PI * 1.15, Math.PI * 2.72); // 上の三日月
+  g.fillStyle = gem; g.fillRect(cx - 17, 13 + y, 3, 3);
+  g.fillStyle = skin; g.fillRect(cx - 17, 30 + y, 4, 3); // 杖を握る手
+}
+
+export function mageSpriteSheet() {
+  const cols = 3, rows = 2;
+  const c = makeCanvas(256);
+  c.width = MW * cols; c.height = MH * rows;
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = false; g.clearRect(0, 0, c.width, c.height);
+  for (let f = 0; f < cols; f++) {
+    drawMage(g, f * MW, f, false);
+    g.save(); g.translate(0, MH); drawMage(g, f * MW, f, true); g.restore();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+  tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
+  return { texture: tex, cols, rows, frameW: MW, frameH: MH };
+}
+
 // ---- 木（ビルボード用） ----
 export function treeSprite(size = 128) {
   const c = makeCanvas(size), g = c.getContext('2d');

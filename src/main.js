@@ -412,12 +412,12 @@ const rain = makeWeather(P.rainSprite(), 600, { size: 34, fall: 7.0, sway: 0.05 
 let weather = 'none'; // 'none' | 'petals' | 'rain'
 
 // ============================================================ プレイヤー（ドット絵ビルボード）
-const sheet = P.characterSpriteSheet();
+const sheet = P.mageSpriteSheet();
 const charMat = new THREE.MeshBasicMaterial({ map: sheet.texture.clone(), transparent: true, alphaTest: 0.4, fog: true });
 charMat.map.magFilter = THREE.NearestFilter; charMat.map.minFilter = THREE.NearestFilter;
 charMat.map.repeat.set(1 / sheet.cols, 1 / sheet.rows);
-const player = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 4.0), charMat);
-player.position.set(0, 2.4, 4);
+const player = new THREE.Mesh(new THREE.PlaneGeometry(3.5, 4.55), charMat);
+player.position.set(0, 2.65, 4);
 scene.add(player);
 // 接地シャドウ（簡易ブロブ）
 const blobMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false });
@@ -995,7 +995,7 @@ function update(dt, t) {
     setFrame(0, lastBack, facingFlip);
   }
  } // フィールド時のみ入力/移動
-  player.position.y = 2.4 + Math.sin(t * 2.2) * 0.04; // 待機の浮遊
+  player.position.y = 2.65 + Math.sin(t * 2.2) * 0.04; // 待機の浮遊
   player.rotation.y = camYaw; // 常にカメラを向くビルボード
   playerBlob.position.set(player.position.x, 0.42, player.position.z);
 
