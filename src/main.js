@@ -22,6 +22,19 @@ renderer.domElement.style.position = 'fixed';
 renderer.domElement.style.inset = '0';
 renderer.domElement.style.width = '100%';
 renderer.domElement.style.height = '100%';
+renderer.domElement.style.touchAction = 'none';
+
+// iOSのダブルタップ/ピンチによるページ拡大を抑止（ゲーム操作と分離）
+['gesturestart', 'gesturechange', 'gestureend'].forEach(ev =>
+  addEventListener(ev, e => e.preventDefault(), { passive: false }));
+addEventListener('dblclick', e => e.preventDefault(), { passive: false });
+let _lastTapT = 0;
+addEventListener('touchend', e => {
+  const now = Date.now();
+  // 同要素以外（ゲーム画面）での素早い2連タップ=ダブルタップ拡大を防ぐ
+  if (now - _lastTapT < 320 && !(e.target.closest && e.target.closest('#bMenu, #btnA, #panel'))) e.preventDefault();
+  _lastTapT = now;
+}, { passive: false });
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x1a2238, 0.018);
@@ -412,12 +425,12 @@ const rain = makeWeather(P.rainSprite(), 600, { size: 34, fall: 7.0, sway: 0.05 
 let weather = 'none'; // 'none' | 'petals' | 'rain'
 
 // ============================================================ プレイヤー（ドット絵ビルボード）
-const sheet = P.mageSpriteSheet();
+const sheet = P.characterSpriteSheet();
 const charMat = new THREE.MeshBasicMaterial({ map: sheet.texture.clone(), transparent: true, alphaTest: 0.4, fog: true });
 charMat.map.magFilter = THREE.NearestFilter; charMat.map.minFilter = THREE.NearestFilter;
 charMat.map.repeat.set(1 / sheet.cols, 1 / sheet.rows);
-const player = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 3.65), charMat);
-player.position.set(0, 2.2, 4);
+const player = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.78), charMat);
+player.position.set(0, 2.3, 4);
 scene.add(player);
 // 接地シャドウ（簡易ブロブ）
 const blobMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false });
@@ -1031,7 +1044,7 @@ function update(dt, t) {
     setFrame(0, lastBack, facingFlip);
   }
  } // フィールド時のみ入力/移動
-  player.position.y = 2.2 + Math.sin(t * 2.2) * 0.04; // 待機の浮遊
+  player.position.y = 2.3 + Math.sin(t * 2.2) * 0.04; // 待機の浮遊
   player.rotation.y = camYaw; // 常にカメラを向くビルボード
   playerBlob.position.set(player.position.x, 0.42, player.position.z);
 

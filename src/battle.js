@@ -47,12 +47,12 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
   const glowTex = P.glowSprite();
 
   // ---- ヒーロー（後ろ姿） ----
-  const heroSheet = P.mageSpriteSheet();
+  const heroSheet = P.characterSpriteSheet();
   const heroMat = new THREE.MeshBasicMaterial({ map: heroSheet.texture, transparent: true, alphaTest: 0.4, fog: true });
   heroMat.map.repeat.set(1 / heroSheet.cols, 1 / heroSheet.rows);
   heroMat.map.offset.set(0, 0); // 背面・静止
-  const hero = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 4.0), heroMat);
-  hero.position.set(-4.5, 2.2, 2.5);
+  const hero = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 4.25), heroMat);
+  hero.position.set(-4.5, 2.4, 2.5);
   scene.add(hero);
 
   // ---- 敵 ----
@@ -177,7 +177,7 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
   // 毎フレーム呼ばれる（メインループから）
   function update(dt, t) {
     const sway = Math.sin(t * 2) * 0.05;
-    hero.position.y = 2.2 + sway; hero.rotation.y = bYaw;        // 常にカメラを向く
+    hero.position.y = 2.4 + sway; hero.rotation.y = bYaw;        // 常にカメラを向く
     if (edata) enemy.position.y = edata.y + Math.sin(t * 1.6) * (edata.sprite === 'bat' ? 0.35 : 0.12);
     enemy.rotation.y = bYaw;
     // ヒットの揺れ
