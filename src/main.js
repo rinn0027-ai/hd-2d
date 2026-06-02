@@ -726,7 +726,7 @@ addEventListener('pointerdown', e => {
 });
 
 // ============================================================ タッチ操作（スマホ）
-// 左半分=フローティング仮想スティック（移動・強く倒すとダッシュ） / 右半分=視点ドラッグ / 2本指=ズーム
+// 1本指 左半分=フローティング仮想スティック / 右半分=視点ドラッグ / 2本指=ピンチでズーム（位置不問）
 const joyVec = { x: 0, y: 0, mag: 0 };       // x:右, y:前(上倒し), mag:0..1
 const isTouch = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
 if (isTouch) document.body.classList.add('touch');
@@ -734,78 +734,80 @@ if (isTouch) document.body.classList.add('touch');
 const joyBase = document.getElementById('joyBase');
 const joyKnob = document.getElementById('joyKnob');
 const JOY_R = 56;
-let joyId = null, joyOx = 0, joyOy = 0;        // スティック中心
-const camSet = new Set();                       // 視点操作中のタッチID
-let camLastX = 0, pinchDist = null;
+const touchMap = new Map();                  // id -> {x,y}
+let joyId = null, camId = null, joyOx = 0, joyOy = 0, camLastX = 0, pinchDist = null;
 
 function showJoy(x, y) {
   joyOx = x; joyOy = y;
   joyBase.style.left = x + 'px'; joyBase.style.top = y + 'px';
   joyBase.style.display = 'block';
+  joyKnob.style.transform = 'translate(-50%, -50%)';
 }
 function moveJoy(x, y) {
   let dx = x - joyOx, dy = y - joyOy;
   const len = Math.hypot(dx, dy);
   if (len > JOY_R) { dx = dx / len * JOY_R; dy = dy / len * JOY_R; }
   joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-  joyVec.x = dx / JOY_R;
-  joyVec.y = -dy / JOY_R;                        // 画面上方向 = 前進
-  joyVec.mag = Math.min(1, len / JOY_R);
+  joyVec.x = dx / JOY_R; joyVec.y = -dy / JOY_R; joyVec.mag = Math.min(1, len / JOY_R);
 }
 function endJoy() {
   joyBase.style.display = 'none';
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-// 現在画面に触れている「視点用」タッチを取得
-function camTouches(touchList) {
-  const arr = [];
-  for (const t of touchList) if (camSet.has(t.identifier)) arr.push(t);
-  return arr;
-}
-// UI要素（パネル/ヘッダ）の上で始まったタッチは操作対象外
 function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #bMenu, #btnA')); }
+
+// タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
+function assignRoles() {
+  const ids = [...touchMap.keys()];
+  if (ids.length >= 2) {
+    if (joyId !== null) { joyId = null; endJoy(); }   // スティック解除
+    camId = null;
+    const a = touchMap.get(ids[0]), b = touchMap.get(ids[1]);
+    pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+  } else if (ids.length === 1) {
+    pinchDist = null;
+    const id = ids[0], p = touchMap.get(id);
+    if (joyId === null && camId === null) {
+      if (p.x < innerWidth * 0.5) { joyId = id; showJoy(p.x, p.y); moveJoy(p.x, p.y); }
+      else { camId = id; camLastX = p.x; }
+    } else if (camId === id) { camLastX = p.x; }
+  } else { pinchDist = null; joyId = null; camId = null; endJoy(); }
+}
 
 addEventListener('touchstart', e => {
   if (onUI(e.target)) return;                    // スライダー/メニュー等はそのまま操作
   if (gameState === 'dialogue') { e.preventDefault(); interact(); return; } // タップで送り
-  if (gameState === 'battle') { e.preventDefault(); return; }              // 移動/視点は無効
-  for (const t of e.changedTouches) {
-    if (t.clientX < innerWidth * 0.5 && joyId === null) {
-      joyId = t.identifier; showJoy(t.clientX, t.clientY); moveJoy(t.clientX, t.clientY);
-    } else {
-      camSet.add(t.identifier);
-    }
-  }
-  const cams = camTouches(e.touches);
-  if (cams.length >= 2) pinchDist = Math.hypot(cams[0].clientX - cams[1].clientX, cams[0].clientY - cams[1].clientY);
-  else if (cams.length === 1) camLastX = cams[0].clientX;
+  if (gameState === 'battle') { e.preventDefault(); return; }              // 視点は battle.js が処理
+  for (const t of e.changedTouches) touchMap.set(t.identifier, { x: t.clientX, y: t.clientY });
+  assignRoles();
   e.preventDefault();
 }, { passive: false });
 
 addEventListener('touchmove', e => {
   if (onUI(e.target)) return;
-  for (const t of e.changedTouches) if (t.identifier === joyId) moveJoy(t.clientX, t.clientY);
-  const cams = camTouches(e.touches);
-  if (cams.length >= 2) {                         // ピンチズーム
-    const d = Math.hypot(cams[0].clientX - cams[1].clientX, cams[0].clientY - cams[1].clientY);
-    if (pinchDist !== null) camDist = THREE.MathUtils.clamp(camDist - (d - pinchDist) * 0.05, 16, 60);
+  for (const t of e.changedTouches) if (touchMap.has(t.identifier)) touchMap.set(t.identifier, { x: t.clientX, y: t.clientY });
+  const ids = [...touchMap.keys()];
+  if (ids.length >= 2) {                          // ピンチズーム（どの位置の2本でも）
+    const a = touchMap.get(ids[0]), b = touchMap.get(ids[1]);
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchDist !== null) camDist = THREE.MathUtils.clamp(camDist - (d - pinchDist) * 0.06, 16, 60);
     pinchDist = d;
-  } else if (cams.length === 1) {                 // 視点回転
-    camYaw -= (cams[0].clientX - camLastX) * 0.008;
-    camLastX = cams[0].clientX;
+  } else if (ids.length === 1) {
+    const id = ids[0], p = touchMap.get(id);
+    if (id === joyId) moveJoy(p.x, p.y);
+    else if (id === camId) { camYaw -= (p.x - camLastX) * 0.008; camLastX = p.x; }
   }
   e.preventDefault();
 }, { passive: false });
 
 function onTouchEnd(e) {
   for (const t of e.changedTouches) {
+    touchMap.delete(t.identifier);
     if (t.identifier === joyId) { joyId = null; endJoy(); }
-    camSet.delete(t.identifier);
+    if (t.identifier === camId) camId = null;
   }
-  const cams = camTouches(e.touches);
-  pinchDist = cams.length >= 2 ? Math.hypot(cams[0].clientX - cams[1].clientX, cams[0].clientY - cams[1].clientY) : null;
-  if (cams.length === 1) camLastX = cams[0].clientX;
+  assignRoles();   // 残った指を再割り当て（ピンチ→1本に戻ったら回転/スティックへ）
 }
 addEventListener('touchend', onTouchEnd);
 addEventListener('touchcancel', onTouchEnd);
