@@ -183,11 +183,17 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
     // ヒットの揺れ
     let shx = 0;
     if (shakeT > 0) { shakeT -= dt; shx = Math.sin(shakeT * 80) * shakeT * 1.2; }
-    // 旋回カメラ（ドラッグ/ピンチで bYaw, bDist が変わる）
-    const h = Math.cos(0.32);
-    cam.position.set(Math.sin(bYaw) * bDist * h + shx, BHEIGHT, Math.cos(bYaw) * bDist * h);
+    // 旋回カメラ（ドラッグ/ピンチで bYaw, bDist が変わる）+ ポートレート補正
+    const aspect = innerWidth / innerHeight;
+    const p = aspect < 1 ? THREE.MathUtils.clamp(1 / aspect - 1, 0, 1.3) : 0;
+    const fov = 34 + p * 10, af = 1 + p * 0.42;
+    if (Math.abs(cam.aspect - aspect) > 0.01 || Math.abs(cam.fov - fov) > 0.1) {
+      cam.aspect = aspect; cam.fov = fov; cam.updateProjectionMatrix();
+    }
+    const dd = bDist * af, h = Math.cos(0.32);
+    cam.position.set(Math.sin(bYaw) * dd * h + shx, BHEIGHT + p * 1.2, Math.cos(bYaw) * dd * h);
     cam.lookAt(0, 2.2, 0);
-    bokeh.uniforms['focus'].value = bDist;
+    bokeh.uniforms['focus'].value = dd;
   }
 
   async function start(enemyType, heroStats) {

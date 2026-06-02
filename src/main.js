@@ -927,6 +927,7 @@ function applyTimeOfDay(t) {
 }
 
 // ============================================================ リサイズ
+let aspectFit = 1; // 縦長(ポートレート)ほどカメラを引いて全景を見せる
 function onResize() {
   const W = innerWidth, H = innerHeight;
   const scale = pixelOn ? 0.34 : 1;
@@ -937,10 +938,20 @@ function onResize() {
   renderer.domElement.style.height = '100%';
   composer.setSize(iw, ih);
   bloom.setSize(iw, ih);
-  camera.aspect = W / H;
+  const aspect = W / H;
+  camera.aspect = aspect;
+  // ポートレート補正: 画角を少し広げ + 距離を少し伸ばし(霧で曇りすぎない配分)
+  if (aspect < 1) {
+    const p = THREE.MathUtils.clamp(1 / aspect - 1, 0, 1.3);
+    camera.fov = 28 + p * 10;     // ~28〜41°
+    aspectFit = 1 + p * 0.42;     // ~1〜1.55
+  } else {
+    camera.fov = 28; aspectFit = 1;
+  }
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', onResize);
+addEventListener('orientationchange', () => setTimeout(onResize, 150));
 onResize();
 
 // ============================================================ ループ
@@ -1035,7 +1046,7 @@ function update(dt, t) {
     Math.sin(camYaw) * Math.cos(camPitch),
     Math.sin(camPitch),
     Math.cos(camYaw) * Math.cos(camPitch)
-  ).multiplyScalar(camDist);
+  ).multiplyScalar(camDist * aspectFit);
   camera.position.copy(camTarget).add(cp);
   camera.lookAt(camTarget);
 

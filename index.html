@@ -153,6 +153,26 @@
       #dlgText { font-size: 14px; }
       #bParty { bottom: 210px; }
     }
+
+    /* 縦持ち(ポートレート)専用レイアウト */
+    @media (orientation: portrait) {
+      #ui h1 { font-size: 13px; }
+      #ui .sub { font-size: 10px; }
+      #panel { width: 150px; font-size: 11px; padding: 8px 10px; top: 10px; right: 10px; }
+      #panel input[type=range] { width: 66px; }
+      #touchHint { font-size: 10px; }
+
+      /* バトルUIを縦に積み直す */
+      #bEnemy { top: 10px; min-width: 200px; }
+      #bMsg { top: 50px; min-width: 220px; }
+      #bParty { left: 10px; right: auto; top: 88px; bottom: auto; min-width: 142px; padding: 8px 10px; }
+      #bMenu { left: 50%; right: auto; transform: translateX(-50%); bottom: 16px;
+               width: calc(100% - 20px); max-width: 440px; grid-template-columns: 1fr 1fr; gap: 8px; }
+      #bMenu button { min-width: 0; width: 100%; }
+      #bHint { bottom: 154px; }
+      /* 決定ボタンは少し上げて被写界を確保 */
+      #btnA { bottom: 150px; }
+    }
   </style>
 </head>
 <body>
