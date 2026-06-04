@@ -41,7 +41,9 @@ scene.fog = new THREE.FogExp2(0x1a2238, 0.012);
 
 // ============================================================ camera（低FOVで箱庭パース）
 const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 400);
-let camYaw = Math.PI * 0.25, camPitch = 0.92, camDist = 26;
+let camPitch = 0.92, camDist = 26;
+let camRot = 0;                                   // タッチ/キーからの視点回転量（このフレーム分）
+const viewFwd = new THREE.Vector3(0, 0, 1);       // 平行移動で運ぶ前方向タンジェント
 
 // ============================================================ ライト
 const hemi = new THREE.HemisphereLight(0x9fb8ff, 0x44351f, 0.55);
@@ -181,7 +183,7 @@ function addTree(dir, s = 1) {
   m.position.copy(surfPos(dir, 3.3 * s));       // 中心を持ち上げ→根本が地表
   worldGroup.add(m);
   surfBills.push({ mesh: m, dir });
-  addObstacleDir(dir, 0.07);
+  addObstacleDir(dir, 0.045);
   return m;
 }
 for (let i = 0; i < 16; i++) addTree(randDir(), 0.8 + Math.random() * 0.5);
@@ -242,7 +244,7 @@ for (let i = 0; i < 5; i++) {
   light.position.copy(surfPos(d, 2.6)); worldGroup.add(light); lampLights.push(light);
   const glow = new THREE.Sprite(lampGlowMat);
   glow.scale.set(1.8, 1.8, 1.8); glow.position.copy(surfPos(d, 2.6)); worldGroup.add(glow);
-  addObstacleDir(d, 0.04);
+  addObstacleDir(d, 0.03);
 }
 
 // ============================================================ ホタル（惑星まわりを漂う）
@@ -398,7 +400,7 @@ function buildHouse(dir) {
   emissiveWindows.push(winMat);
   grp.position.copy(surfPos(dir, 0)); alignUp(grp, dir);
   worldGroup.add(grp);
-  addObstacleDir(dir, 0.11);
+  addObstacleDir(dir, 0.085);
   return grp;
 }
 const emissiveWindows = [];
@@ -414,7 +416,7 @@ function addNPC(dir, paletteName, name, lines) {
   m.position.copy(surfPos(dir, 1.55));
   scene.add(m);
   const npc = { mesh: m, name, lines, dir: dir.clone().normalize(), wanderT: Math.random() * 5 };
-  npcs.push(npc); addObstacleDir(dir, 0.05);
+  npcs.push(npc); addObstacleDir(dir, 0.04);
   return npc;
 }
 addNPC(new THREE.Vector3(0.2, 0.9, 0.3).normalize(), 'villager', '村人', ['やあ、旅の人。', 'この星、ぐるっと一周\nできるらしいぜ。', '草むらは まもの だらけだ。気をつけな。']);
@@ -435,7 +437,7 @@ function addChest(dir, reward) {
   grp.position.copy(surfPos(dir, 0.15)); alignUp(grp, dir);
   worldGroup.add(grp);
   const chest = { grp, lid, dir: dir.clone().normalize(), opened: false, reward };
-  chests.push(chest); addObstacleDir(dir, 0.04);
+  chests.push(chest); addObstacleDir(dir, 0.035);
   return chest;
 }
 addChest(new THREE.Vector3(-0.6, -0.3, -0.6).normalize(), { potions: 2 });
@@ -443,7 +445,7 @@ addChest(new THREE.Vector3(0.7, -0.5, 0.4).normalize(), { potions: 1 });
 
 // ============================================================ 遭遇ゾーン（草むらの球面キャップ）
 const encounterZones = [];
-for (let i = 0; i < 7; i++) encounterZones.push({ dir: randDir(), ang: 0.34 });
+for (let i = 0; i < 5; i++) encounterZones.push({ dir: randDir(), ang: 0.3 });
 
 // ============================================================ 花・岩（地表ビルボード）
 const flowerColors = ['#ffd23a', '#ff7a9c', '#c08aff', '#ff9a4a', '#ffffff'];
@@ -462,7 +464,7 @@ for (let i = 0, tries = 0; i < 14 && tries < 200; tries++) {
   const s = 1.0 + Math.random() * 0.7;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(1.8 * s, 1.8 * s), rockMat);
   m.position.copy(surfPos(d, 0.85 * s)); worldGroup.add(m); surfBills.push({ mesh: m, dir: d }); i++;
-  addObstacleDir(d, 0.05);
+  addObstacleDir(d, 0.035);
 }
 
 // ============================================================ ポストプロセス
@@ -723,7 +725,7 @@ addEventListener('touchmove', e => {
   } else if (ids.length === 1) {
     const id = ids[0], p = touchMap.get(id);
     if (id === joyId) moveJoy(p.x, p.y);
-    else if (id === camId) { camYaw -= (p.x - camLastX) * 0.008; camLastX = p.x; }
+    else if (id === camId) { camRot -= (p.x - camLastX) * 0.008; camLastX = p.x; }
   }
   e.preventDefault();
 }, { passive: false });
@@ -865,8 +867,8 @@ function checkEncounter(dt, dash) {
   let inZone = false;
   for (const z2 of encounterZones) { if (pDir.dot(z2.dir) > Math.cos(z2.ang)) { inZone = true; break; } }
   if (!inZone) { stepsSinceBattle = Math.max(0, stepsSinceBattle - dt * 2); return; }
-  stepsSinceBattle += dt * (dash ? 2.4 : 1.6);
-  if (stepsSinceBattle > 0.5 && Math.random() < dt * 1.5) triggerBattle();
+  stepsSinceBattle += dt * (dash ? 1.3 : 1.0);
+  if (stepsSinceBattle > 1.4 && Math.random() < dt * 0.35) triggerBattle();
 }
 
 // 交互作用プロンプト（モバイル=決定ボタン / デスクトップ=テキストヒント）
@@ -883,22 +885,35 @@ function updatePrompt() {
   }
 }
 
-// 惑星上のタンジェント基底（up=法線, camYawで前方向を回す）
-const _up = new THREE.Vector3(), _east = new THREE.Vector3(), _north = new THREE.Vector3(), _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _ref = new THREE.Vector3(), _axis = new THREE.Vector3(), _foot = new THREE.Vector3(), _off = new THREE.Vector3();
+// 惑星上のタンジェント基底（up=法線 / 前方向は平行移動で運ぶ→極でも連続）
+const _up = new THREE.Vector3(), _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _axis = new THREE.Vector3(), _foot = new THREE.Vector3(), _off = new THREE.Vector3();
+const _md = new THREE.Vector3(), _cand = new THREE.Vector3();
 function planetBasis() {
   _up.copy(pDir).normalize();
-  _ref.copy(Math.abs(_up.y) < 0.9 ? UPVEC : XAXIS);
-  _east.crossVectors(_ref, _up).normalize();
-  _north.crossVectors(_up, _east).normalize();
-  _fwd.copy(_east).multiplyScalar(Math.cos(camYaw)).addScaledVector(_north, Math.sin(camYaw)).normalize();
+  viewFwd.addScaledVector(_up, -viewFwd.dot(_up));            // 法線成分を除去（平行移動）
+  if (viewFwd.lengthSq() < 1e-6) { viewFwd.crossVectors(_up, XAXIS); if (viewFwd.lengthSq() < 1e-6) viewFwd.crossVectors(_up, UPVEC); }
+  viewFwd.normalize();
+  _fwd.copy(viewFwd);
   _right.crossVectors(_fwd, _up).normalize();
+}
+// moveDir(タンジェント単位)へ arc だけ球面回転。障害物には「外から侵入」する時だけ阻まれる
+function tryMove(moveDir, arc) {
+  _axis.crossVectors(_up, moveDir).normalize();
+  _cand.copy(pDir).applyAxisAngle(_axis, arc).normalize();
+  for (const o of obstacles) {
+    const co = Math.cos(o.ang);
+    if (_cand.dot(o.dir) > co && pDir.dot(o.dir) <= co) return false; // 外側→内側のみブロック
+  }
+  pDir.copy(_cand); return true;
 }
 
 function update(dt, t) {
   let ix = 0, iy = 0, dash = false;
   if (gameState === 'field') {
-    if (keys['q']) camYaw -= dt * 1.4;
-    if (keys['e']) camYaw += dt * 1.4;
+    if (keys['q']) camRot += dt * 1.4;
+    if (keys['e']) camRot -= dt * 1.4;
+    _up.copy(pDir).normalize();
+    if (camRot) { viewFwd.applyAxisAngle(_up, camRot); camRot = 0; }
     planetBasis();
     if (keys['w'] || keys['arrowup']) iy += 1;
     if (keys['s'] || keys['arrowdown']) iy -= 1;
@@ -910,14 +925,14 @@ function update(dt, t) {
     dash = keys['shift'] || joyVec.mag > 0.9;
     const speed = dash ? 11 : 6;
     if (inMag > 0.05) {
-      // 接線方向の移動 → pDir をその軸まわりに回転（球面を歩く）
-      _axis.copy(_fwd).multiplyScalar(iy).addScaledVector(_right, ix).normalize(); // 進行方向
-      _axis.crossVectors(_up, _axis).normalize();                                  // 回転軸
       const arc = speed * dt * Math.min(1, inMag) / PLANET_R;
-      const cand = pDir.clone().applyAxisAngle(_axis, arc).normalize();
-      let blocked = false;
-      for (const o of obstacles) { if (cand.dot(o.dir) > Math.cos(o.ang)) { blocked = true; break; } }
-      if (!blocked) pDir.copy(cand);
+      _md.copy(_fwd).multiplyScalar(iy).addScaledVector(_right, ix).normalize();
+      // 直進が塞がれたら左右に滑って回り込む
+      if (!tryMove(_md, arc)) {
+        const slid = _md.clone();
+        if (!tryMove(slid.copy(_md).applyAxisAngle(_up, 0.6), arc))
+          tryMove(slid.copy(_md).applyAxisAngle(_up, -0.6), arc);
+      }
       if (Math.abs(ix) > 0.0005) facingFlip = ix < 0;
       lastBack = iy > Math.abs(ix) * 0.6;
       walkAnim += dt * (dash ? 13 : 9);
@@ -929,6 +944,8 @@ function update(dt, t) {
       walkAnim = 0;
       setFrame(0, lastBack, facingFlip);
     }
+  } else {
+    camRot = 0;
   }
 
   // --- 基底とプレイヤー配置（フィールド外でも安定して見せる）---
