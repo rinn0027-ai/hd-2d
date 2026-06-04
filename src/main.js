@@ -7,6 +7,7 @@ import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as P from './procedural.js';
+import * as M from './models.js';
 import { createBattle, ENEMY_TYPES } from './battle.js';
 import * as Audio from './audio.js';
 
@@ -172,21 +173,20 @@ scene.add(mist);
 const obstacles = [];
 function addObstacleDir(dir, ang) { obstacles.push({ dir: dir.clone().normalize(), ang }); }
 function nearObstacle(dir, pad = 0.04) { for (const o of obstacles) if (dir.dot(o.dir) > Math.cos(o.ang + pad)) return true; return false; }
-const surfBills = []; // 地表ビルボード {mesh, dir}（木・花・岩）
 
 
-// ============================================================ 木（地表ビルボード）
-const treeTex = P.treeSprite();
-const treeMat = new THREE.MeshBasicMaterial({ map: treeTex, transparent: true, alphaTest: 0.5, fog: true });
-function addTree(dir, s = 1) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(7 * s, 7 * s), treeMat.clone());
-  m.position.copy(surfPos(dir, 3.3 * s));       // 中心を持ち上げ→根本が地表
-  worldGroup.add(m);
-  surfBills.push({ mesh: m, dir });
-  addObstacleDir(dir, 0.045);
-  return m;
+// ============================================================ 木（3Dローポリ）
+function placeOnSurface(obj, dir, up0 = UPVEC) {
+  obj.position.copy(surfPos(dir, 0));
+  obj.quaternion.setFromUnitVectors(up0, dir);
 }
-for (let i = 0; i < 16; i++) addTree(randDir(), 0.8 + Math.random() * 0.5);
+function addTree(dir, s = 1) {
+  const g = M.makeTree(s);
+  placeOnSurface(g, dir);
+  worldGroup.add(g);
+  addObstacleDir(dir, 0.05);
+}
+for (let i = 0; i < 16; i++) addTree(randDir(), 0.85 + Math.random() * 0.5);
 
 // ============================================================ 草むら（法線に沿って生やす）
 const grassBladeTex = P.grassBladeSprite();
@@ -232,18 +232,15 @@ grassInst.instanceMatrix.needsUpdate = true;
 grassInst.frustumCulled = false;
 worldGroup.add(grassInst);
 
-// ============================================================ ランタン（点光源 + glowでbloom）
+// ============================================================ ランタン（3D + 点光源, 先端がbloomで光る）
 const glowTex = P.glowSprite();
-const lampGlowMat = new THREE.SpriteMaterial({ map: glowTex, color: 0xffd88a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
 const lampLights = [];
 for (let i = 0; i < 5; i++) {
   const d = randDir();
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 2.4, 6), new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 0.8 }));
-  post.position.copy(surfPos(d, 1.1)); alignUp(post, d); post.castShadow = true; worldGroup.add(post);
+  const { root } = M.makeLampPost();
+  placeOnSurface(root, d); worldGroup.add(root);
   const light = new THREE.PointLight(0xffb45a, 6, 10, 2);
-  light.position.copy(surfPos(d, 2.6)); worldGroup.add(light); lampLights.push(light);
-  const glow = new THREE.Sprite(lampGlowMat);
-  glow.scale.set(1.8, 1.8, 1.8); glow.position.copy(surfPos(d, 2.6)); worldGroup.add(glow);
+  light.position.copy(surfPos(d, 2.5)); worldGroup.add(light); lampLights.push(light);
   addObstacleDir(d, 0.03);
 }
 
@@ -335,50 +332,14 @@ const petals = makeWeather(P.petalSprite(), 320, { size: 26, fall: 1.3, sway: 1.
 const rain = makeWeather(P.rainSprite(), 600, { size: 34, fall: 7.0, sway: 0.05 });
 let weather = 'none'; // 'none' | 'petals' | 'rain'
 
-// ============================================================ プレイヤー（ドット絵ビルボード）
-const sheet = P.characterSpriteSheet();
-const charMat = new THREE.MeshBasicMaterial({ map: sheet.texture.clone(), transparent: true, alphaTest: 0.4, fog: true });
-charMat.map.magFilter = THREE.NearestFilter; charMat.map.minFilter = THREE.NearestFilter;
-charMat.map.repeat.set(1 / sheet.cols, 1 / sheet.rows);
-const player = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.78), charMat);
+// ============================================================ プレイヤー（3Dローポリ人型）
+const playerModel = M.makeHumanoid({ skin: 0xe8b88c, cloth: 0x3b86a8, pants: 0x2f4f6a, hat: 0xcaa45a });
+const player = playerModel.root;
 scene.add(player);
 // プレイヤーは惑星上の方向ベクトルで管理（北極からスタート）
 const pDir = new THREE.Vector3(0, 1, 0);
-const PLAYER_LIFT = 1.7; // スプライト中心の地表からの高さ
-player.position.copy(surfPos(pDir, PLAYER_LIFT));
-
-// スプライトシートの列/行（外部PNG差し替えで変わりうる）
-let spriteCols = sheet.cols, spriteRows = sheet.rows;
-function setFrame(col, back, flip) {
-  const m = charMat.map;
-  m.repeat.y = 1 / spriteRows;
-  m.offset.y = back ? 0 : (spriteRows > 1 ? 1 - 1 / spriteRows : 0);
-  if (flip) { m.repeat.x = -1 / spriteCols; m.offset.x = (col + 1) / spriteCols; }
-  else { m.repeat.x = 1 / spriteCols; m.offset.x = col / spriteCols; }
-}
-setFrame(0, false, false);
-
-// ============================================================ 外部スプライトシートの差し替え（任意）
-// assets/player.png があれば自動で読み込んで主役の絵を置き換える。
-//   レイアウト規格: 横=歩行コマ(既定3列) / 縦=向き(上段:前向き, 下段:後ろ向き の2行)
-//   透過PNG・ドット絵推奨。各コマは同サイズ。列数は ?cols= で上書き可。
-const sheetParam = new URLSearchParams(location.search);
-const customCols = parseInt(sheetParam.get('cols') || '3', 10);
-function applyExternalSheet(texture, cols, rows) {
-  texture.magFilter = THREE.NearestFilter; texture.minFilter = THREE.NearestFilter;
-  texture.colorSpace = THREE.SRGBColorSpace; texture.generateMipmaps = false;
-  texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
-  charMat.map = texture; charMat.needsUpdate = true;
-  spriteCols = cols; spriteRows = rows;
-  setFrame(0, false, false);
-  console.info('[hd-2d] external player sheet loaded:', cols + 'x' + rows);
-}
-new THREE.TextureLoader().load(
-  'assets/player.png',
-  tex => applyExternalSheet(tex, customCols, 2),
-  undefined,
-  () => { /* 無ければ手続き生成のドット絵のまま */ }
-);
+const PLAYER_LIFT = 0.0;                 // 足元が地表に接地
+const heading = new THREE.Vector3(0, 0, 1); // 向いている接線方向
 
 // ============================================================ 建物（小屋）— 惑星表面に立てる
 function buildHouse(dir) {
@@ -406,37 +367,33 @@ function buildHouse(dir) {
 const emissiveWindows = [];
 buildHouse(new THREE.Vector3(0.4, 0.7, 0.3).normalize());
 
-// ============================================================ NPC（地表ビルボード + 対話）
+// ============================================================ NPC（3Dローポリ + 対話）
+const NPC_COLORS = {
+  villager: { skin: 0xe8b88c, cloth: 0x7a8c3a, pants: 0x4c5a26, hat: 0xb06b3a },
+  merchant: { skin: 0xe8b88c, cloth: 0x8a3b7a, pants: 0x54234c, hat: 0xcaa45a },
+  guard: { skin: 0xe8b88c, cloth: 0x3a5a8c, pants: 0x233a54, hat: 0x9aa3ad },
+  elder: { skin: 0xead2b4, cloth: 0x6a5a8c, pants: 0x3f3454, hat: 0xd8d0c0 },
+};
 const npcs = [];
 function addNPC(dir, paletteName, name, lines) {
-  const sh = P.characterSpriteSheet(P.NPC_PALETTES[paletteName]);
-  const mat = new THREE.MeshBasicMaterial({ map: sh.texture, transparent: true, alphaTest: 0.4, fog: true });
-  mat.map.repeat.set(1 / sh.cols, 1 / sh.rows); mat.map.offset.set(0, 0.5); // front idle
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.8), mat);
-  m.position.copy(surfPos(dir, 1.55));
-  scene.add(m);
-  const npc = { mesh: m, name, lines, dir: dir.clone().normalize(), wanderT: Math.random() * 5 };
-  npcs.push(npc); addObstacleDir(dir, 0.04);
+  const model = M.makeHumanoid(NPC_COLORS[paletteName]);
+  placeOnSurface(model.root, dir);
+  scene.add(model.root);
+  const npc = { model, name, lines, dir: dir.clone().normalize(), wanderT: Math.random() * 5 };
+  npcs.push(npc); addObstacleDir(dir, 0.045);
   return npc;
 }
 addNPC(new THREE.Vector3(0.2, 0.9, 0.3).normalize(), 'villager', '村人', ['やあ、旅の人。', 'この星、ぐるっと一周\nできるらしいぜ。', '草むらは まもの だらけだ。気をつけな。']);
 addNPC(new THREE.Vector3(-0.5, 0.6, 0.6).normalize(), 'merchant', '行商人', ['丸い大地…\nどこまで歩いても落ちないとはね。', '右上のつまみで時間も変わる。']);
 addNPC(new THREE.Vector3(0.6, 0.2, -0.5).normalize(), 'guard', '衛兵', ['星の裏側にも まもの がいる。', '草むらを駆け抜けると\nよく出くわすぞ。']);
-addNPC(new THREE.Vector3(-0.3, -0.7, 0.4).normalize(), 'elder', '長老', ['ようこそ、小さな星へ。', '2Dの絵が球の上で\n光と影をまとう…', 'これぞ ディオラマの魔法じゃ。']);
+addNPC(new THREE.Vector3(-0.3, -0.7, 0.4).normalize(), 'elder', '長老', ['ようこそ、小さな星へ。', '2Dの絵が3Dになって\n球の上を歩く…', 'これぞ ディオラマの魔法じゃ。']);
 
-// ============================================================ 宝箱（交互作用）
+// ============================================================ 宝箱（3D + 交互作用）
 const chests = [];
 function addChest(dir, reward) {
-  const grp = new THREE.Group();
-  const base = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.7, 0.8), new THREE.MeshStandardMaterial({ color: 0x7a4a24, roughness: 0.7 }));
-  base.position.y = 0.35; base.castShadow = true; grp.add(base);
-  const lid = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.35, 0.85), new THREE.MeshStandardMaterial({ color: 0x9c6a34, roughness: 0.6 }));
-  lid.position.y = 0.78; grp.add(lid);
-  const band = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.9, 0.2), new THREE.MeshStandardMaterial({ color: 0xd9c06a, metalness: 0.6, roughness: 0.4 }));
-  band.position.set(0, 0.5, 0); grp.add(band);
-  grp.position.copy(surfPos(dir, 0.15)); alignUp(grp, dir);
-  worldGroup.add(grp);
-  const chest = { grp, lid, dir: dir.clone().normalize(), opened: false, reward };
+  const { root, lidPivot } = M.makeChest();
+  placeOnSurface(root, dir); worldGroup.add(root);
+  const chest = { grp: root, lidPivot, dir: dir.clone().normalize(), opened: false, reward };
   chests.push(chest); addObstacleDir(dir, 0.035);
   return chest;
 }
@@ -447,23 +404,19 @@ addChest(new THREE.Vector3(0.7, -0.5, 0.4).normalize(), { potions: 1 });
 const encounterZones = [];
 for (let i = 0; i < 5; i++) encounterZones.push({ dir: randDir(), ang: 0.3 });
 
-// ============================================================ 花・岩（地表ビルボード）
-const flowerColors = ['#ffd23a', '#ff7a9c', '#c08aff', '#ff9a4a', '#ffffff'];
-const flowerMatCache = flowerColors.map(c => new THREE.MeshBasicMaterial({ map: P.flowerSprite(48, c), transparent: true, alphaTest: 0.5, fog: true }));
-for (let i = 0, tries = 0; i < 60 && tries < 600; tries++) {
+// ============================================================ 花・岩（3D）
+const flowerColors = [0xffd23a, 0xff7a9c, 0xc08aff, 0xff9a4a, 0xffffff];
+for (let i = 0, tries = 0; i < 34 && tries < 500; tries++) {
   const d = randDir();
   if (nearObstacle(d, 0.04)) continue;
-  const mat = flowerMatCache[Math.floor(Math.random() * flowerMatCache.length)];
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), mat);
-  m.position.copy(surfPos(d, 0.5)); worldGroup.add(m); surfBills.push({ mesh: m, dir: d }); i++;
+  const f = M.makeFlower(flowerColors[Math.floor(Math.random() * flowerColors.length)]);
+  placeOnSurface(f, d); worldGroup.add(f); i++;
 }
-const rockMat = new THREE.MeshBasicMaterial({ map: P.rockSprite(), transparent: true, alphaTest: 0.5, fog: true });
-for (let i = 0, tries = 0; i < 14 && tries < 200; tries++) {
+for (let i = 0, tries = 0; i < 16 && tries < 200; tries++) {
   const d = randDir();
   if (nearObstacle(d, 0.04)) continue;
-  const s = 1.0 + Math.random() * 0.7;
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.8 * s, 1.8 * s), rockMat);
-  m.position.copy(surfPos(d, 0.85 * s)); worldGroup.add(m); surfBills.push({ mesh: m, dir: d }); i++;
+  const r = M.makeRock(0.9 + Math.random() * 0.8);
+  placeOnSurface(r, d); worldGroup.add(r); i++;
   addObstacleDir(d, 0.035);
 }
 
@@ -621,7 +574,7 @@ function interact() {
   if (!nearTarget) return;
   if (nearTarget.type === 'npc') { Audio.sfx('confirm'); startDialogue(nearTarget.ref.name, nearTarget.ref.lines); }
   else if (nearTarget.type === 'chest') {
-    const c = nearTarget.ref; c.opened = true; c.lid.rotation.x = -1.1; c.lid.position.z = -0.3;
+    const c = nearTarget.ref; c.opened = true; c.lidPivot.rotation.x = -1.2;
     Audio.sfx('chest');
     const got = c.reward.potions || 0; hero.potions += got;
     startDialogue('たからばこ', [`やくそうを ${got}個 みつけた！`]);
@@ -812,8 +765,6 @@ function applyTimeOfDay(t) {
   const dayAmt = 1 - Math.abs(t - 0.5) * 2;
   for (const L of lampLights) L.intensity = THREE.MathUtils.lerp(8, 2.5, THREE.MathUtils.clamp(dayAmt, 0, 1));
   fireflies.visible = dayAmt < 0.55;
-  // キャラとビルボードの環境トーン
-  charMat.color.copy(cA.set(a.sky).lerp(cB.set(b.sky), k)).multiplyScalar(0.4).addScalar(0.62);
 
   // --- 空ドーム ---
   const sCol = lerpC(a.sky, b.sky);                 // cA を返す
@@ -906,9 +857,18 @@ function tryMove(moveDir, arc) {
   }
   pDir.copy(_cand); return true;
 }
+// 地表に立つ3D物体を向ける（up=法線, +Z=fwd方向）
+function orientStanding(obj, up, fwd) {
+  _z.copy(fwd).addScaledVector(up, -fwd.dot(up));
+  if (_z.lengthSq() < 1e-6) { _z.crossVectors(up, XAXIS); if (_z.lengthSq() < 1e-6) _z.crossVectors(up, UPVEC); }
+  _z.normalize();
+  _x.crossVectors(up, _z).normalize();
+  _m.makeBasis(_x, up, _z);
+  obj.quaternion.setFromRotationMatrix(_m);
+}
 
 function update(dt, t) {
-  let ix = 0, iy = 0, dash = false;
+  let ix = 0, iy = 0, dash = false, playerMoving = false;
   if (gameState === 'field') {
     if (keys['q']) camRot += dt * 1.4;
     if (keys['e']) camRot -= dt * 1.4;
@@ -924,33 +884,29 @@ function update(dt, t) {
     if (inMag > 1) { ix /= inMag; iy /= inMag; }
     dash = keys['shift'] || joyVec.mag > 0.9;
     const speed = dash ? 11 : 6;
-    if (inMag > 0.05) {
+    playerMoving = inMag > 0.05;
+    if (playerMoving) {
       const arc = speed * dt * Math.min(1, inMag) / PLANET_R;
       _md.copy(_fwd).multiplyScalar(iy).addScaledVector(_right, ix).normalize();
-      // 直進が塞がれたら左右に滑って回り込む
-      if (!tryMove(_md, arc)) {
+      heading.copy(_md);                                   // 進行方向を向く
+      if (!tryMove(_md, arc)) {                            // 直進が塞がれたら滑って回り込む
         const slid = _md.clone();
         if (!tryMove(slid.copy(_md).applyAxisAngle(_up, 0.6), arc))
           tryMove(slid.copy(_md).applyAxisAngle(_up, -0.6), arc);
       }
-      if (Math.abs(ix) > 0.0005) facingFlip = ix < 0;
-      lastBack = iy > Math.abs(ix) * 0.6;
-      walkAnim += dt * (dash ? 13 : 9);
-      setFrame(1 + (Math.floor(walkAnim) % 2), lastBack, facingFlip);
       stepTimer -= dt;
       if (stepTimer <= 0) { Audio.sfx('step'); stepTimer = dash ? 0.22 : 0.34; }
       checkEncounter(dt, dash);
-    } else {
-      walkAnim = 0;
-      setFrame(0, lastBack, facingFlip);
     }
   } else {
     camRot = 0;
   }
 
-  // --- 基底とプレイヤー配置（フィールド外でも安定して見せる）---
+  // --- 基底とプレイヤー配置 ---
   planetBasis();
   player.position.copy(pDir).multiplyScalar(PLANET_R + PLAYER_LIFT + Math.sin(t * 2.2) * 0.04);
+  orientStanding(player, _up, heading);
+  playerModel.update(dt, playerMoving, dash ? 1.4 : 1.0);
 
   // --- カメラ（惑星の上を周回する三人称）---
   _foot.copy(pDir).multiplyScalar(PLANET_R + 1.4);
@@ -959,11 +915,8 @@ function update(dt, t) {
   camera.up.copy(_up);
   camera.lookAt(_foot);
 
-  surfaceBillboard(player, pDir); // カメラ位置確定後に向ける
-
-  // --- NPC/装飾の地表ビルボード ---
-  for (const n of npcs) { n.mesh.position.copy(surfPos(n.dir, 1.55 + Math.sin(t * 1.8 + n.wanderT) * 0.05)); surfaceBillboard(n.mesh, n.dir); }
-  for (const b of surfBills) surfaceBillboard(b.mesh, b.dir);
+  // --- NPC（待機モーション）---
+  for (const n of npcs) { n.model.root.position.copy(surfPos(n.dir, Math.sin(t * 1.8 + n.wanderT) * 0.04)); n.model.update(dt, false); }
   nearTarget = findInteract();
   updatePrompt();
 

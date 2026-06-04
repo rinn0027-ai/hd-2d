@@ -1,12 +1,13 @@
 // battle.js — 簡易な回合制バトル（独自シーン + コマンドUI + ダメージ表示）
 import * as THREE from 'three';
 import * as P from './procedural.js';
+import * as M from './models.js';
 import { sfx, setMood } from './audio.js';
 
 const ENEMIES = {
-  slime:    { name: 'スライム',     hp: 34, atk: 6,  exp: 8,  sprite: 'slime',    scale: 5.0, y: 2.4 },
-  mushroom: { name: 'マッシュロア', hp: 50, atk: 9,  exp: 16, sprite: 'mushroom', scale: 5.4, y: 2.6 },
-  bat:      { name: 'ナイトバット', hp: 30, atk: 8,  exp: 12, sprite: 'bat',      scale: 4.6, y: 3.2 },
+  slime:    { name: 'スライム',     hp: 34, atk: 6,  exp: 8,  type: 'slime',    scale: 1.7, hover: 0 },
+  mushroom: { name: 'マッシュロア', hp: 50, atk: 9,  exp: 16, type: 'mushroom', scale: 1.6, hover: 0 },
+  bat:      { name: 'ナイトバット', hp: 30, atk: 8,  exp: 12, type: 'bat',      scale: 1.5, hover: 1.2 },
 };
 export const ENEMY_TYPES = Object.keys(ENEMIES);
 
@@ -28,38 +29,27 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
 
   // 地面
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(22, 40),
+    new THREE.CircleGeometry(26, 48),
     new THREE.MeshStandardMaterial({ map: P.grassTexture(128), roughness: 1 })
   );
-  ground.rotation.x = -Math.PI / 2; scene.add(ground);
-  ground.material.map.repeat.set(6, 6);
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+  ground.material.map.repeat.set(7, 7);
 
-  // 背景のシルエット木
-  const treeTex = P.treeSprite();
-  const treeMat = new THREE.MeshBasicMaterial({ map: treeTex, transparent: true, alphaTest: 0.5, color: 0x223044, fog: true });
-  for (let i = 0; i < 7; i++) {
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), treeMat);
-    m.position.set(-18 + i * 6 + (Math.random() - 0.5) * 2, 4.5, -12 - Math.random() * 4);
-    scene.add(m);
+  // 背景の3D木
+  for (let i = 0; i < 8; i++) {
+    const tr = M.makeTree(1.1 + Math.random() * 0.4);
+    tr.position.set(-20 + i * 5.4 + (Math.random() - 0.5) * 2, 0, -13 - Math.random() * 4);
+    scene.add(tr);
   }
 
-  // ホタル風の浮遊光（雰囲気）
-  const glowTex = P.glowSprite();
-
-  // ---- ヒーロー（後ろ姿） ----
-  const heroSheet = P.characterSpriteSheet();
-  const heroMat = new THREE.MeshBasicMaterial({ map: heroSheet.texture, transparent: true, alphaTest: 0.4, fog: true });
-  heroMat.map.repeat.set(1 / heroSheet.cols, 1 / heroSheet.rows);
-  heroMat.map.offset.set(0, 0); // 背面・静止
-  const hero = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 4.25), heroMat);
-  hero.position.set(-4.5, 2.4, 2.5);
+  // ---- ヒーロー（3D・背中をカメラへ）----
+  const heroModel = M.makeHumanoid({ skin: 0xe8b88c, cloth: 0x3b86a8, pants: 0x2f4f6a, hat: 0xcaa45a });
+  const hero = heroModel.root;
+  hero.position.set(-3.5, 0, 4.5); hero.rotation.y = Math.PI; // 奥（敵側）を向く＝背中がカメラ
   scene.add(hero);
 
-  // ---- 敵 ----
-  const enemyMat = new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.4, fog: true });
-  const enemy = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), enemyMat);
-  enemy.position.set(4.0, 2.6, -1.0);
-  scene.add(enemy);
+  // ---- 敵（3D・差し替え式）----
+  let enemyRoot = null;
 
   // ---- DOM ----
   const $ = id => document.getElementById(id);
@@ -146,7 +136,7 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
     const crit = Math.random() < 0.15;
     let dmg = rand(8, 13) * (crit ? 2 : 1);
     eHP -= dmg; sfx('hit'); shakeT = 0.25;
-    showDamage(enemy, dmg, crit ? 'crit' : ''); updateBars();
+    showDamage(enemyRoot, dmg, crit ? 'crit' : ''); updateBars();
     if (crit) await message('会心の一撃！', 600);
     await delay(380);
   }
@@ -154,7 +144,7 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
     sfx('skill'); await lunge(hero, 1);
     const dmg = rand(16, 24);
     eHP -= dmg; sfx('hit'); shakeT = 0.35;
-    showDamage(enemy, dmg, 'crit'); updateBars();
+    showDamage(enemyRoot, dmg, 'crit'); updateBars();
     await message('斬撃スキル！', 600); await delay(300);
   }
   async function useItem() {
@@ -166,7 +156,7 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
   }
   async function enemyTurn() {
     await message(edata.name + 'の こうげき！', 600);
-    sfx('attack'); await lunge(enemy, -1);
+    sfx('attack'); await lunge(enemyRoot, -1);
     const dmg = rand(edata.atk - 2, edata.atk + 3);
     stats.hp -= dmg; sfx('hit'); shakeT = 0.3;
     showDamage(hero, dmg); updateBars();
@@ -176,10 +166,9 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
   let active = false;
   // 毎フレーム呼ばれる（メインループから）
   function update(dt, t) {
-    const sway = Math.sin(t * 2) * 0.05;
-    hero.position.y = 2.4 + sway; hero.rotation.y = bYaw;        // 常にカメラを向く
-    if (edata) enemy.position.y = edata.y + Math.sin(t * 1.6) * (edata.sprite === 'bat' ? 0.35 : 0.12);
-    enemy.rotation.y = bYaw;
+    heroModel.update(dt, false);
+    hero.position.y = Math.sin(t * 2) * 0.04;                    // 待機の上下
+    if (edata && enemyRoot) enemyRoot.position.y = edata.hover + Math.sin(t * 1.6) * (edata.hover ? 0.3 : 0.1);
     // ヒットの揺れ
     let shx = 0;
     if (shakeT > 0) { shakeT -= dt; shx = Math.sin(shakeT * 80) * shakeT * 1.2; }
@@ -199,9 +188,11 @@ export function createBattle({ renderPass, bokeh, heroPal }) {
   async function start(enemyType, heroStats) {
     edata = ENEMIES[enemyType] || ENEMIES.slime;
     eMax = eHP = edata.hp; stats = heroStats;
-    enemyMat.map = P.enemySprite(edata.sprite);
-    enemyMat.needsUpdate = true;
-    enemy.scale.set(edata.scale, edata.scale, 1);
+    if (enemyRoot) scene.remove(enemyRoot);
+    enemyRoot = M.makeEnemy(edata.type).root;
+    enemyRoot.scale.setScalar(edata.scale);
+    enemyRoot.position.set(3.5, edata.hover, -3);
+    scene.add(enemyRoot);
     enemyNameEl.textContent = edata.name;
     bYaw = 0; bDist = 13; pointers.clear(); bPinch = null;
     updateBars(); setMenu(false); clearMsg();
