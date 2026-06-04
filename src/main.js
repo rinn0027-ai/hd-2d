@@ -37,12 +37,11 @@ addEventListener('touchend', e => {
 }, { passive: false });
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x1a2238, 0.018);
+scene.fog = new THREE.FogExp2(0x1a2238, 0.012);
 
 // ============================================================ camera（低FOVで箱庭パース）
 const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 400);
-let camYaw = Math.PI * 0.25, camPitch = 0.92, camDist = 34;
-const camTarget = new THREE.Vector3(0, 1.2, 0);
+let camYaw = Math.PI * 0.25, camPitch = 0.92, camDist = 26;
 
 // ============================================================ ライト
 const hemi = new THREE.HemisphereLight(0x9fb8ff, 0x44351f, 0.55);
@@ -109,240 +108,151 @@ const dirtTex = P.dirtTexture();
 const stoneTex = P.stoneTexture();
 const stoneNrm = P.normalFromHeight(128, 0.05, 2.6);
 
-// ============================================================ 地形ジオラマ（ブロックを積む）
-// 高さマップ: 中央は平地(0)、外周を一段高くして"切り取られたジオラマ"風に。
-const GRID = 28, TILE = 2.0;
+// ============================================================ 小惑星（プラネット）
+const PLANET_R = 16;
 const worldGroup = new THREE.Group();
 scene.add(worldGroup);
 
-function tileHeight(gx, gz) {
-  const cx = gx - GRID / 2, cz = gz - GRID / 2;
-  const r = Math.hypot(cx, cz);
-  if (r > 11.5) return -1;            // 範囲外（虚空）
-  if (r > 9.5) return 2;              // 外周の高台
-  return 0;                          // 中央の平地
+const UPVEC = new THREE.Vector3(0, 1, 0);
+const XAXIS = new THREE.Vector3(1, 0, 0);
+const _z = new THREE.Vector3(), _x = new THREE.Vector3(), _m = new THREE.Matrix4();
+function randDir() {
+  const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, s = Math.sqrt(1 - u * u);
+  return new THREE.Vector3(s * Math.cos(a), u, s * Math.sin(a));
+}
+function surfPos(dir, extra = 0) { return dir.clone().multiplyScalar(PLANET_R + extra); }
+function alignUp(obj, dir) { obj.quaternion.setFromUnitVectors(UPVEC, dir); }
+// 地表に立つビルボード（up=法線, 正面=カメラ方向）
+function surfaceBillboard(obj, dir) {
+  _z.copy(camera.position).sub(obj.position);
+  _z.addScaledVector(dir, -_z.dot(dir));            // 法線成分を除去
+  if (_z.lengthSq() < 1e-5) _z.set(dir.z, dir.x, -dir.y);
+  _z.normalize();
+  _x.crossVectors(dir, _z).normalize();
+  _m.makeBasis(_x, dir, _z);
+  obj.quaternion.setFromRotationMatrix(_m);
 }
 
 const grassMat = new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1, metalness: 0 });
-const sideMat = new THREE.MeshStandardMaterial({ map: stoneTex, normalMap: stoneNrm, roughness: 0.95 });
-const dirtMat = new THREE.MeshStandardMaterial({ map: dirtTex, roughness: 1 });
+grassTex.wrapS = grassTex.wrapT = THREE.RepeatWrapping; grassTex.repeat.set(8, 5);
 
-const topGeo = new THREE.BoxGeometry(TILE, 0.4, TILE);
-const blockGeoCache = {};
-function blockGeo(h) {
-  if (!blockGeoCache[h]) blockGeoCache[h] = new THREE.BoxGeometry(TILE, h, TILE);
-  return blockGeoCache[h];
-}
-
-// 小道（中央を横切る土の帯）
-function isPath(gx, gz) {
-  const cz = gz - GRID / 2;
-  return Math.abs(cz) < 1.5;
-}
-
-const flatTiles = []; // 歩ける平地座標
-for (let gx = 0; gx < GRID; gx++) {
-  for (let gz = 0; gz < GRID; gz++) {
-    const h = tileHeight(gx, gz);
-    if (h < 0) continue;
-    const wx = (gx - GRID / 2) * TILE;
-    const wz = (gz - GRID / 2) * TILE;
-    const baseH = 4 + h; // 地中の厚み
-    // 土台ブロック（側面=石）
-    const block = new THREE.Mesh(blockGeo(baseH), sideMat);
-    block.position.set(wx, h - baseH / 2, wz);
-    block.castShadow = true; block.receiveShadow = true;
-    worldGroup.add(block);
-    // 天面（草 or 土）
-    const path = h === 0 && isPath(gx, gz);
-    const top = new THREE.Mesh(topGeo, path ? dirtMat : grassMat);
-    top.position.set(wx, h + 0.2, wz);
-    top.receiveShadow = true; top.castShadow = true;
-    worldGroup.add(top);
-    if (h === 0) flatTiles.push(new THREE.Vector3(wx, h + 0.4, wz));
+// 惑星本体（軽い起伏つき）
+const planetGeo = new THREE.SphereGeometry(PLANET_R, 96, 64);
+{
+  const pos = planetGeo.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const n = v.clone().normalize();
+    const bump = Math.sin(n.x * 5) * Math.cos(n.y * 4) * 0.22 + Math.sin(n.z * 7 + 1.3) * 0.16;
+    v.addScaledVector(n, bump);
+    pos.setXYZ(i, v.x, v.y, v.z);
   }
+  planetGeo.computeVertexNormals();
 }
+const planet = new THREE.Mesh(planetGeo, grassMat);
+planet.receiveShadow = true; planet.castShadow = true;
+scene.add(planet);
 
-// ============================================================ 水（中央付近の池）— カスタムシェーダー
-const waterUniforms = {
-  uTime: { value: 0 },
-  uShallow: { value: new THREE.Color(0x4fd6e0) },
-  uDeep: { value: new THREE.Color(0x123a66) },
-  uSky: { value: new THREE.Color(0x8fb8ff) },
-};
-const waterMat = new THREE.ShaderMaterial({
-  transparent: true,
-  uniforms: waterUniforms,
-  vertexShader: /* glsl */`
-    varying vec2 vUv; varying vec3 vWorld;
-    uniform float uTime;
-    void main(){
-      vUv = uv;
-      vec3 p = position;
-      p.z += sin(p.x*1.5 + uTime*1.6)*0.06 + cos(p.y*1.8 + uTime*1.1)*0.05;
-      vec4 wp = modelMatrix * vec4(p,1.0);
-      vWorld = wp.xyz;
-      gl_Position = projectionMatrix * viewMatrix * wp;
-    }`,
-  fragmentShader: /* glsl */`
-    varying vec2 vUv; varying vec3 vWorld;
-    uniform float uTime; uniform vec3 uShallow, uDeep, uSky;
-    float hash(vec2 p){return fract(sin(dot(p,vec2(41.3,289.1)))*43758.5);}
-    float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
-      return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
-    void main(){
-      vec2 uv = vUv*6.0;
-      float n = noise(uv + uTime*0.25) * 0.6 + noise(uv*2.3 - uTime*0.4)*0.4;
-      vec3 col = mix(uDeep, uShallow, smoothstep(0.3,0.85,n));
-      // きらめき（specular風）
-      float spark = pow(noise(uv*5.0 + uTime*0.9), 22.0) * 3.0;
-      col += vec3(1.0,0.95,0.8) * spark;
-      col = mix(col, uSky, 0.18);
-      // 縁の泡
-      float edge = min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y));
-      float foam = smoothstep(0.05, 0.0, edge) * (0.55 + 0.45*sin(uTime*3.0 + (vUv.x+vUv.y)*45.0));
-      col = mix(col, vec3(0.92,0.97,1.0), clamp(foam,0.0,1.0)*0.55);
-      gl_FragColor = vec4(col, 0.82);
-    }`
-});
-const water = new THREE.Mesh(new THREE.PlaneGeometry(11, 7, 40, 28), waterMat);
-water.rotation.x = -Math.PI / 2;
-water.position.set(-7, 0.28, -7);
-worldGroup.add(water);
-
-// ============================================================ 地表の薄雾（ボリューム感）
-const mistUniforms = {
-  uTime: { value: 0 },
-  uColor: { value: new THREE.Color(0xdfe8f5) },
-  uStrength: { value: 0.45 },
-};
+// 大気シェル（"薄霧"トグルで表示）
+const mistUniforms = { uTime: { value: 0 }, uColor: { value: new THREE.Color(0xdfe8f5) }, uStrength: { value: 0.55 } };
 const mist = new THREE.Mesh(
-  new THREE.PlaneGeometry(46, 46, 1, 1),
+  new THREE.SphereGeometry(PLANET_R * 1.18, 48, 32),
   new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, uniforms: mistUniforms,
-    vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
-    fragmentShader: /* glsl */`
-      varying vec2 vUv; uniform float uTime,uStrength; uniform vec3 uColor;
-      float hash(vec2 p){return fract(sin(dot(p,vec2(41.3,289.1)))*43758.5);}
-      float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
-        return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
-      float fbm(vec2 p){float s=0.,a=.5;for(int i=0;i<5;i++){s+=a*noise(p);p*=2.;a*=.5;}return s;}
-      void main(){
-        vec2 uv = vUv*4.0;
-        float n = fbm(uv + vec2(uTime*0.04, uTime*0.02));
-        n = smoothstep(0.35, 0.9, n);
-        // 中央ほど薄く、外周で濃く（縁を隠す）
-        float edge = smoothstep(0.2, 0.5, distance(vUv, vec2(0.5)));
-        float a = n * uStrength * (0.4 + edge);
-        gl_FragColor = vec4(uColor, a);
-      }`,
+    transparent: true, side: THREE.BackSide, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: mistUniforms,
+    vertexShader: `varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);} `,
+    fragmentShader: `varying vec3 vN; uniform vec3 uColor; uniform float uStrength;
+      void main(){ float rim = pow(1.0 - abs(vN.z), 2.2); gl_FragColor = vec4(uColor, rim*uStrength); }`,
   })
 );
-mist.rotation.x = -Math.PI / 2;
-mist.position.set(0, 0.75, 0);
-mist.renderOrder = 2;
 scene.add(mist);
 
-// ============================================================ 木（ビルボード）
+// 角度ベースの障害物 {dir, ang}
+const obstacles = [];
+function addObstacleDir(dir, ang) { obstacles.push({ dir: dir.clone().normalize(), ang }); }
+function nearObstacle(dir, pad = 0.04) { for (const o of obstacles) if (dir.dot(o.dir) > Math.cos(o.ang + pad)) return true; return false; }
+const surfBills = []; // 地表ビルボード {mesh, dir}（木・花・岩）
+
+
+// ============================================================ 木（地表ビルボード）
 const treeTex = P.treeSprite();
 const treeMat = new THREE.MeshBasicMaterial({ map: treeTex, transparent: true, alphaTest: 0.5, fog: true });
-function addTree(x, z, s = 1) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(8 * s, 8 * s), treeMat.clone());
-  m.position.set(x, 4 * s + 0.2, z);
-  m.userData.billboard = true;
+function addTree(dir, s = 1) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(7 * s, 7 * s), treeMat.clone());
+  m.position.copy(surfPos(dir, 3.3 * s));       // 中心を持ち上げ→根本が地表
   worldGroup.add(m);
+  surfBills.push({ mesh: m, dir });
+  addObstacleDir(dir, 0.07);
   return m;
 }
-const trees = [];
-for (let i = 0; i < 10; i++) {
-  const a = Math.random() * Math.PI * 2, r = 6 + Math.random() * 3.5;
-  trees.push(addTree(Math.cos(a) * r, Math.sin(a) * r, 0.8 + Math.random() * 0.5));
-}
+for (let i = 0; i < 16; i++) addTree(randDir(), 0.8 + Math.random() * 0.5);
 
-// ============================================================ 草むら（揺れる instanced billboard）
+// ============================================================ 草むら（法線に沿って生やす）
 const grassBladeTex = P.grassBladeSprite();
-const COUNT = 1400;
+const COUNT = 1800;
 const bladeGeo = new THREE.PlaneGeometry(1, 1);
 bladeGeo.translate(0, 0.5, 0); // 根本を原点に
 const aPhase = new Float32Array(COUNT);
-const aScale = new Float32Array(COUNT);
 bladeGeo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(aPhase, 1));
-bladeGeo.setAttribute('aScale', new THREE.InstancedBufferAttribute(aScale, 1));
 const grassU = { uTime: { value: 0 }, uMap: { value: grassBladeTex } };
 const grassMatI = new THREE.ShaderMaterial({
   uniforms: grassU, transparent: true, depthWrite: true,
   vertexShader: /* glsl */`
-    attribute float aPhase; attribute float aScale;
-    varying vec2 vUv; varying float vY;
+    attribute float aPhase; varying vec2 vUv; varying float vY;
     uniform float uTime;
     void main(){
       vUv = uv; vY = position.y;
-      vec3 center = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
-      vec3 toCam = normalize(vec3(cameraPosition.x - center.x, 0.0, cameraPosition.z - center.z));
-      vec3 right = normalize(cross(vec3(0,1,0), toCam));
-      float sway = sin(uTime*1.8 + aPhase)*0.18 * position.y;
-      vec3 world = center
-        + right * (position.x*aScale + sway*aScale)
-        + vec3(0,1,0) * (position.y*aScale*1.6);
-      gl_Position = projectionMatrix * viewMatrix * vec4(world,1.0);
+      vec3 p = position;
+      p.x += sin(uTime*1.8 + aPhase) * 0.16 * position.y;   // 風で揺れ
+      vec4 wp = modelMatrix * instanceMatrix * vec4(p,1.0);
+      gl_Position = projectionMatrix * viewMatrix * wp;
     }`,
   fragmentShader: /* glsl */`
-    varying vec2 vUv; varying float vY;
-    uniform sampler2D uMap;
+    varying vec2 vUv; varying float vY; uniform sampler2D uMap;
     void main(){
       vec4 t = texture2D(uMap, vUv);
       if(t.a < 0.5) discard;
-      // 上ほど明るく
-      gl_FragColor = vec4(t.rgb * (0.65 + vY*0.5), 1.0);
+      gl_FragColor = vec4(t.rgb * (0.6 + vY*0.5), 1.0);
     }`
 });
 const grassInst = new THREE.InstancedMesh(bladeGeo, grassMatI, COUNT);
 const dummy = new THREE.Object3D();
-let placed = 0;
-for (let i = 0; i < COUNT * 3 && placed < COUNT; i++) {
-  const x = (Math.random() - 0.5) * 36, z = (Math.random() - 0.5) * 36;
-  const r = Math.hypot(x, z);
-  if (r > 9.2) continue;
-  if (Math.abs(z) < 1.6) continue; // 小道は避ける
-  if (x > -12.5 && x < -1.5 && z > -10.5 && z < -3.5) continue; // 池
-  dummy.position.set(x, 0.4, z);
+for (let i = 0; i < COUNT; i++) {
+  const d = randDir();
+  dummy.position.copy(surfPos(d, 0));
+  dummy.quaternion.setFromUnitVectors(UPVEC, d);
+  dummy.rotateY(Math.random() * Math.PI * 2);
+  const sc = 0.8 + Math.random() * 0.8; dummy.scale.set(sc, sc * 1.7, sc);
   dummy.updateMatrix();
-  grassInst.setMatrixAt(placed, dummy.matrix);
-  aPhase[placed] = Math.random() * Math.PI * 2;
-  aScale[placed] = 0.7 + Math.random() * 0.7;
-  placed++;
+  grassInst.setMatrixAt(i, dummy.matrix);
+  aPhase[i] = Math.random() * Math.PI * 2;
 }
-grassInst.count = placed;
 grassInst.instanceMatrix.needsUpdate = true;
-grassInst.frustumCulled = false; // 頂点をシェーダーで動かすため
+grassInst.frustumCulled = false;
 worldGroup.add(grassInst);
-
-const flatBillboards = []; // カメラY軸ビルボードする装飾小物（花・岩）
 
 // ============================================================ ランタン（点光源 + glowでbloom）
 const glowTex = P.glowSprite();
 const lampGlowMat = new THREE.SpriteMaterial({ map: glowTex, color: 0xffd88a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
-const lampPositions = [[3, 0, 3], [-3, 0, 2.5], [4.5, 0, -3.5], [0, 0, 6]];
 const lampLights = [];
-for (const [x, , z] of lampPositions) {
+for (let i = 0; i < 5; i++) {
+  const d = randDir();
   const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 2.4, 6), new THREE.MeshStandardMaterial({ color: 0x2a2118, roughness: 0.8 }));
-  post.position.set(x, 1.4, z); post.castShadow = true; worldGroup.add(post);
-  const light = new THREE.PointLight(0xffb45a, 6, 9, 2);
-  light.position.set(x, 2.7, z);
-  worldGroup.add(light); lampLights.push(light);
+  post.position.copy(surfPos(d, 1.1)); alignUp(post, d); post.castShadow = true; worldGroup.add(post);
+  const light = new THREE.PointLight(0xffb45a, 6, 10, 2);
+  light.position.copy(surfPos(d, 2.6)); worldGroup.add(light); lampLights.push(light);
   const glow = new THREE.Sprite(lampGlowMat);
-  glow.scale.set(1.8, 1.8, 1.8); glow.position.set(x, 2.7, z);
-  worldGroup.add(glow);
+  glow.scale.set(1.8, 1.8, 1.8); glow.position.copy(surfPos(d, 2.6)); worldGroup.add(glow);
+  addObstacleDir(d, 0.04);
 }
 
-// ============================================================ ホタル（Points + additive bloom）
-const FF = 120;
+// ============================================================ ホタル（惑星まわりを漂う）
+const FF = 150;
 const ffGeo = new THREE.BufferGeometry();
 const ffPos = new Float32Array(FF * 3);
 const ffSeed = new Float32Array(FF);
 for (let i = 0; i < FF; i++) {
-  const a = Math.random() * Math.PI * 2, r = Math.random() * 9;
-  ffPos[i * 3] = Math.cos(a) * r; ffPos[i * 3 + 1] = 0.6 + Math.random() * 3; ffPos[i * 3 + 2] = Math.sin(a) * r;
+  const d = randDir().multiplyScalar(PLANET_R + 0.6 + Math.random() * 3);
+  ffPos[i * 3] = d.x; ffPos[i * 3 + 1] = d.y; ffPos[i * 3 + 2] = d.z;
   ffSeed[i] = Math.random() * 100;
 }
 ffGeo.setAttribute('position', new THREE.BufferAttribute(ffPos, 3));
@@ -370,7 +280,6 @@ const ffMat = new THREE.ShaderMaterial({
     }`
 });
 const fireflies = new THREE.Points(ffGeo, ffMat);
-fireflies.position.y = 0.4;
 fireflies.frustumCulled = false;
 worldGroup.add(fireflies);
 
@@ -417,7 +326,7 @@ function makeWeather(tex, count, opts) {
   });
   const pts = new THREE.Points(geo, mat);
   pts.frustumCulled = false; pts.visible = false;
-  pts.position.y = 0.4; scene.add(pts);
+  scene.add(pts);
   return pts;
 }
 const petals = makeWeather(P.petalSprite(), 320, { size: 26, fall: 1.3, sway: 1.1 });
@@ -430,13 +339,11 @@ const charMat = new THREE.MeshBasicMaterial({ map: sheet.texture.clone(), transp
 charMat.map.magFilter = THREE.NearestFilter; charMat.map.minFilter = THREE.NearestFilter;
 charMat.map.repeat.set(1 / sheet.cols, 1 / sheet.rows);
 const player = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.78), charMat);
-player.position.set(0, 2.3, 4);
 scene.add(player);
-// 接地シャドウ（簡易ブロブ）
-const blobMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false });
-const playerBlob = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), blobMat);
-playerBlob.rotation.x = -Math.PI / 2;
-scene.add(playerBlob);
+// プレイヤーは惑星上の方向ベクトルで管理（北極からスタート）
+const pDir = new THREE.Vector3(0, 1, 0);
+const PLAYER_LIFT = 1.7; // スプライト中心の地表からの高さ
+player.position.copy(surfPos(pDir, PLAYER_LIFT));
 
 // スプライトシートの列/行（外部PNG差し替えで変わりうる）
 let spriteCols = sheet.cols, spriteRows = sheet.rows;
@@ -471,17 +378,8 @@ new THREE.TextureLoader().load(
   () => { /* 無ければ手続き生成のドット絵のまま */ }
 );
 
-// ============================================================ 障害物（円形コリジョン）
-// 木・池・建物などを円で近似。プレイヤーはこれらを通り抜けられない。
-const obstacles = [];
-function addObstacle(x, z, r) { obstacles.push({ x, z, r }); }
-// 木をコリジョン化
-for (const tr of trees) addObstacle(tr.position.x, tr.position.z, 1.0);
-// 池
-addObstacle(-7, -7, 4.2);
-
-// ============================================================ 建物（小屋）
-function buildHouse(x, z, rot = 0) {
+// ============================================================ 建物（小屋）— 惑星表面に立てる
+function buildHouse(dir) {
   const grp = new THREE.Group();
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xb9a07a, roughness: 0.9 });
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2c, roughness: 0.8 });
@@ -492,42 +390,41 @@ function buildHouse(x, z, rot = 0) {
   roof.position.y = 4.5; roof.rotation.y = Math.PI / 4; roof.castShadow = true; grp.add(roof);
   const door = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.8, 0.2), woodMat);
   door.position.set(0, 1.3, 1.85); grp.add(door);
-  // 夜に光る窓（emissive）
   const winMat = new THREE.MeshStandardMaterial({ color: 0x2a2418, emissive: 0xffb84a, emissiveIntensity: 0, roughness: 0.5 });
   for (const wx of [-1.3, 1.3]) {
     const w = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.15), winMat);
     w.position.set(wx, 2.2, 1.85); grp.add(w);
   }
   emissiveWindows.push(winMat);
-  grp.position.set(x, 0.4, z); grp.rotation.y = rot;
+  grp.position.copy(surfPos(dir, 0)); alignUp(grp, dir);
   worldGroup.add(grp);
-  addObstacle(x, z, 2.6);
+  addObstacleDir(dir, 0.11);
   return grp;
 }
 const emissiveWindows = [];
-buildHouse(5.5, 5.0, -0.4);
+buildHouse(new THREE.Vector3(0.4, 0.7, 0.3).normalize());
 
-// ============================================================ NPC（ビルボード + 対話）
+// ============================================================ NPC（地表ビルボード + 対話）
 const npcs = [];
-function addNPC(x, z, paletteName, name, lines) {
+function addNPC(dir, paletteName, name, lines) {
   const sh = P.characterSpriteSheet(P.NPC_PALETTES[paletteName]);
   const mat = new THREE.MeshBasicMaterial({ map: sh.texture, transparent: true, alphaTest: 0.4, fog: true });
   mat.map.repeat.set(1 / sh.cols, 1 / sh.rows); mat.map.offset.set(0, 0.5); // front idle
   const m = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.8), mat);
-  m.position.set(x, 2.3, z);
+  m.position.copy(surfPos(dir, 1.55));
   scene.add(m);
-  const npc = { mesh: m, name, lines, x, z, home: new THREE.Vector2(x, z), wanderT: Math.random() * 5, sheet: sh };
-  npcs.push(npc); addObstacle(x, z, 0.8);
+  const npc = { mesh: m, name, lines, dir: dir.clone().normalize(), wanderT: Math.random() * 5 };
+  npcs.push(npc); addObstacleDir(dir, 0.05);
   return npc;
 }
-addNPC(2.5, 3.0, 'villager', '村人', ['やあ、旅の人。', 'この先の草むらには\nまものが出るから気をつけな。', 'ダッシュで駆け抜けるのも手だよ。']);
-addNPC(-2.0, 4.5, 'merchant', '行商人', ['いい天気… いや、もう夜かい？', '右上のつまみで時間を\n変えられるそうだ。不思議だね。']);
-addNPC(4.5, 2.0, 'guard', '衛兵', ['この街は平和そのものさ。', '草むらのまものを\n退治してくれると助かる。']);
-addNPC(-4.5, -2.0, 'elder', '長老', ['ようこそ、HD-2Dの世界へ。', '2Dの絵が3Dの光と影をまとう…', 'これぞ ディオラマの魔法じゃ。']);
+addNPC(new THREE.Vector3(0.2, 0.9, 0.3).normalize(), 'villager', '村人', ['やあ、旅の人。', 'この星、ぐるっと一周\nできるらしいぜ。', '草むらは まもの だらけだ。気をつけな。']);
+addNPC(new THREE.Vector3(-0.5, 0.6, 0.6).normalize(), 'merchant', '行商人', ['丸い大地…\nどこまで歩いても落ちないとはね。', '右上のつまみで時間も変わる。']);
+addNPC(new THREE.Vector3(0.6, 0.2, -0.5).normalize(), 'guard', '衛兵', ['星の裏側にも まもの がいる。', '草むらを駆け抜けると\nよく出くわすぞ。']);
+addNPC(new THREE.Vector3(-0.3, -0.7, 0.4).normalize(), 'elder', '長老', ['ようこそ、小さな星へ。', '2Dの絵が球の上で\n光と影をまとう…', 'これぞ ディオラマの魔法じゃ。']);
 
 // ============================================================ 宝箱（交互作用）
 const chests = [];
-function addChest(x, z, reward) {
+function addChest(dir, reward) {
   const grp = new THREE.Group();
   const base = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.7, 0.8), new THREE.MeshStandardMaterial({ color: 0x7a4a24, roughness: 0.7 }));
   base.position.y = 0.35; base.castShadow = true; grp.add(base);
@@ -535,44 +432,37 @@ function addChest(x, z, reward) {
   lid.position.y = 0.78; grp.add(lid);
   const band = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.9, 0.2), new THREE.MeshStandardMaterial({ color: 0xd9c06a, metalness: 0.6, roughness: 0.4 }));
   band.position.set(0, 0.5, 0); grp.add(band);
-  grp.position.set(x, 0.6, z); worldGroup.add(grp);
-  const chest = { grp, lid, x, z, opened: false, reward };
-  chests.push(chest); addObstacle(x, z, 0.7);
+  grp.position.copy(surfPos(dir, 0.15)); alignUp(grp, dir);
+  worldGroup.add(grp);
+  const chest = { grp, lid, dir: dir.clone().normalize(), opened: false, reward };
+  chests.push(chest); addObstacleDir(dir, 0.04);
   return chest;
 }
-addChest(6.5, -5.0, { potions: 2 });
-addChest(-6.0, 6.0, { potions: 1 });
+addChest(new THREE.Vector3(-0.6, -0.3, -0.6).normalize(), { potions: 2 });
+addChest(new THREE.Vector3(0.7, -0.5, 0.4).normalize(), { potions: 1 });
 
-// ============================================================ 遭遇ゾーン（草むら円）
-const encounterZones = [
-  { x: 5, z: -6, r: 3.5 }, { x: -6, z: 4, r: 3.2 }, { x: 6, z: 6, r: 3.0 }, { x: -5, z: -5, r: 3.2 },
-];
+// ============================================================ 遭遇ゾーン（草むらの球面キャップ）
+const encounterZones = [];
+for (let i = 0; i < 7; i++) encounterZones.push({ dir: randDir(), ang: 0.34 });
 
-// ============================================================ 花・岩（装飾ビルボード）— 障害物が出揃ってから配置
-function freeGround(x, z) {
-  if (Math.hypot(x, z) > 8.6) return false;
-  if (Math.abs(z) < 1.6) return false;                            // 小道
-  if (x > -12.5 && x < -1.5 && z > -10.5 && z < -3.5) return false; // 池
-  for (const o of obstacles) if ((x - o.x) ** 2 + (z - o.z) ** 2 < (o.r + 0.7) ** 2) return false;
-  return true;
-}
+// ============================================================ 花・岩（地表ビルボード）
 const flowerColors = ['#ffd23a', '#ff7a9c', '#c08aff', '#ff9a4a', '#ffffff'];
 const flowerMatCache = flowerColors.map(c => new THREE.MeshBasicMaterial({ map: P.flowerSprite(48, c), transparent: true, alphaTest: 0.5, fog: true }));
-for (let i = 0, tries = 0; i < 44 && tries < 400; tries++) {
-  const x = (Math.random() - 0.5) * 17, z = (Math.random() - 0.5) * 17;
-  if (!freeGround(x, z)) continue;
+for (let i = 0, tries = 0; i < 60 && tries < 600; tries++) {
+  const d = randDir();
+  if (nearObstacle(d, 0.04)) continue;
   const mat = flowerMatCache[Math.floor(Math.random() * flowerMatCache.length)];
   const m = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), mat);
-  m.position.set(x, 0.95, z); worldGroup.add(m); flatBillboards.push(m); i++;
+  m.position.copy(surfPos(d, 0.5)); worldGroup.add(m); surfBills.push({ mesh: m, dir: d }); i++;
 }
 const rockMat = new THREE.MeshBasicMaterial({ map: P.rockSprite(), transparent: true, alphaTest: 0.5, fog: true });
-for (let i = 0, tries = 0; i < 12 && tries < 200; tries++) {
-  const x = (Math.random() - 0.5) * 17, z = (Math.random() - 0.5) * 17;
-  if (!freeGround(x, z)) continue;
+for (let i = 0, tries = 0; i < 14 && tries < 200; tries++) {
+  const d = randDir();
+  if (nearObstacle(d, 0.04)) continue;
   const s = 1.0 + Math.random() * 0.7;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(1.8 * s, 1.8 * s), rockMat);
-  m.position.set(x, 0.4 + 0.9 * s, z); worldGroup.add(m); flatBillboards.push(m); i++;
-  addObstacle(x, z, 0.5);
+  m.position.copy(surfPos(d, 0.85 * s)); worldGroup.add(m); surfBills.push({ mesh: m, dir: d }); i++;
+  addObstacleDir(d, 0.05);
 }
 
 // ============================================================ ポストプロセス
@@ -706,8 +596,8 @@ async function triggerBattle() {
   else if (result === 'lose') {
     // 全回復して街へ戻す
     hero.hp = hero.maxHp; hero.sp = hero.maxSp;
-    player.position.set(0, 2.4, 4);
-    showArea('街の広場', 'TOWN SQUARE');
+    pDir.set(0, 1, 0);
+    showArea('スタート地点', 'RESPAWN');
   }
   stepsSinceBattle = 0;
   // フィールドBGMに戻す
@@ -718,10 +608,9 @@ async function triggerBattle() {
 // ============================================================ 交互作用（最寄りのNPC/宝箱）
 let nearTarget = null;
 function findInteract() {
-  let best = null, bestD = 2.6 * 2.6;
-  const px2 = player.position.x, pz2 = player.position.z;
-  for (const n of npcs) { const d = (n.mesh.position.x - px2) ** 2 + (n.mesh.position.z - pz2) ** 2; if (d < bestD) { bestD = d; best = { type: 'npc', ref: n }; } }
-  for (const c of chests) { if (c.opened) continue; const d = (c.x - px2) ** 2 + (c.z - pz2) ** 2; if (d < bestD) { bestD = d; best = { type: 'chest', ref: c }; } }
+  let best = null, bestDot = Math.cos(0.18); // 角度しきい値
+  for (const n of npcs) { const dt = pDir.dot(n.dir); if (dt > bestDot) { bestDot = dt; best = { type: 'npc', ref: n }; } }
+  for (const c of chests) { if (c.opened) continue; const dt = pDir.dot(c.dir); if (dt > bestDot) { bestDot = dt; best = { type: 'chest', ref: c }; } }
   return best;
 }
 function interact() {
@@ -969,17 +858,15 @@ onResize();
 
 // ============================================================ ループ
 const clock = new THREE.Clock();
-const vel = new THREE.Vector3();
 let facingFlip = false, lastBack = false, walkAnim = 0, stepTimer = 0;
-const tmp = new THREE.Vector3();
 
-// 草むらでの遭遇判定
-function checkEncounter(dt, x, z, dash) {
+// 草むら（球面キャップ）での遭遇判定 — 遭遇率は高め
+function checkEncounter(dt, dash) {
   let inZone = false;
-  for (const z2 of encounterZones) { if ((x - z2.x) ** 2 + (z - z2.z) ** 2 < z2.r * z2.r) { inZone = true; break; } }
-  if (!inZone) { stepsSinceBattle = Math.max(0, stepsSinceBattle - dt); return; }
-  stepsSinceBattle += dt * (dash ? 1.7 : 1.0);
-  if (stepsSinceBattle > 1.0 && Math.random() < dt * 0.6) triggerBattle();
+  for (const z2 of encounterZones) { if (pDir.dot(z2.dir) > Math.cos(z2.ang)) { inZone = true; break; } }
+  if (!inZone) { stepsSinceBattle = Math.max(0, stepsSinceBattle - dt * 2); return; }
+  stepsSinceBattle += dt * (dash ? 2.4 : 1.6);
+  if (stepsSinceBattle > 0.5 && Math.random() < dt * 1.5) triggerBattle();
 }
 
 // 交互作用プロンプト（モバイル=決定ボタン / デスクトップ=テキストヒント）
@@ -996,94 +883,89 @@ function updatePrompt() {
   }
 }
 
+// 惑星上のタンジェント基底（up=法線, camYawで前方向を回す）
+const _up = new THREE.Vector3(), _east = new THREE.Vector3(), _north = new THREE.Vector3(), _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _ref = new THREE.Vector3(), _axis = new THREE.Vector3(), _foot = new THREE.Vector3(), _off = new THREE.Vector3();
+function planetBasis() {
+  _up.copy(pDir).normalize();
+  _ref.copy(Math.abs(_up.y) < 0.9 ? UPVEC : XAXIS);
+  _east.crossVectors(_ref, _up).normalize();
+  _north.crossVectors(_up, _east).normalize();
+  _fwd.copy(_east).multiplyScalar(Math.cos(camYaw)).addScaledVector(_north, Math.sin(camYaw)).normalize();
+  _right.crossVectors(_fwd, _up).normalize();
+}
+
 function update(dt, t) {
- if (gameState === 'field') {
-  // --- カメラ回転入力 ---
-  if (keys['q']) camYaw -= dt * 1.4;
-  if (keys['e']) camYaw += dt * 1.4;
-
-  // --- 移動（カメラ基準）: キーボード(デジタル) + 仮想スティック(アナログ) ---
-  const forward = new THREE.Vector3(-Math.sin(camYaw), 0, -Math.cos(camYaw));
-  const rightV = new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw));
-  let ix = 0, iy = 0; // ix:右, iy:前
-  if (keys['w'] || keys['arrowup']) iy += 1;
-  if (keys['s'] || keys['arrowdown']) iy -= 1;
-  if (keys['d'] || keys['arrowright']) ix += 1;
-  if (keys['a'] || keys['arrowleft']) ix -= 1;
-  ix += joyVec.x; iy += joyVec.y;
-  const inMag = Math.hypot(ix, iy);
-  if (inMag > 1) { ix /= inMag; iy /= inMag; } // 斜め・併用でも最大1に
-  const dash = keys['shift'] || joyVec.mag > 0.9;
-  const speed = dash ? 11 : 6;
-  vel.copy(forward).multiplyScalar(iy).addScaledVector(rightV, ix).multiplyScalar(speed * dt);
-  const moving = (inMag > 0.05);
-  if (moving) {
-    let nx = player.position.x + vel.x, nz = player.position.z + vel.z;
-    // マップ境界（円）
-    const rr = Math.hypot(nx, nz);
-    if (rr > 9.0) { nx = nx / rr * 9.0; nz = nz / rr * 9.0; }
-    // 障害物から押し出し（円コリジョン）
-    const PR = 0.55;
-    for (const o of obstacles) {
-      const dx = nx - o.x, dz = nz - o.z, d = Math.hypot(dx, dz), min = o.r + PR;
-      if (d < min && d > 1e-4) { nx = o.x + dx / d * min; nz = o.z + dz / d * min; }
+  let ix = 0, iy = 0, dash = false;
+  if (gameState === 'field') {
+    if (keys['q']) camYaw -= dt * 1.4;
+    if (keys['e']) camYaw += dt * 1.4;
+    planetBasis();
+    if (keys['w'] || keys['arrowup']) iy += 1;
+    if (keys['s'] || keys['arrowdown']) iy -= 1;
+    if (keys['d'] || keys['arrowright']) ix += 1;
+    if (keys['a'] || keys['arrowleft']) ix -= 1;
+    ix += joyVec.x; iy += joyVec.y;
+    const inMag = Math.hypot(ix, iy);
+    if (inMag > 1) { ix /= inMag; iy /= inMag; }
+    dash = keys['shift'] || joyVec.mag > 0.9;
+    const speed = dash ? 11 : 6;
+    if (inMag > 0.05) {
+      // 接線方向の移動 → pDir をその軸まわりに回転（球面を歩く）
+      _axis.copy(_fwd).multiplyScalar(iy).addScaledVector(_right, ix).normalize(); // 進行方向
+      _axis.crossVectors(_up, _axis).normalize();                                  // 回転軸
+      const arc = speed * dt * Math.min(1, inMag) / PLANET_R;
+      const cand = pDir.clone().applyAxisAngle(_axis, arc).normalize();
+      let blocked = false;
+      for (const o of obstacles) { if (cand.dot(o.dir) > Math.cos(o.ang)) { blocked = true; break; } }
+      if (!blocked) pDir.copy(cand);
+      if (Math.abs(ix) > 0.0005) facingFlip = ix < 0;
+      lastBack = iy > Math.abs(ix) * 0.6;
+      walkAnim += dt * (dash ? 13 : 9);
+      setFrame(1 + (Math.floor(walkAnim) % 2), lastBack, facingFlip);
+      stepTimer -= dt;
+      if (stepTimer <= 0) { Audio.sfx('step'); stepTimer = dash ? 0.22 : 0.34; }
+      checkEncounter(dt, dash);
+    } else {
+      walkAnim = 0;
+      setFrame(0, lastBack, facingFlip);
     }
-    player.position.x = nx; player.position.z = nz;
-    // 向き：画面上での左右と前後
-    if (Math.abs(ix) > 0.0005) facingFlip = ix < 0;
-    lastBack = iy > Math.abs(ix) * 0.6; // 奥向き=背面
-    walkAnim += dt * (dash ? 13 : 9);
-    setFrame(1 + (Math.floor(walkAnim) % 2), lastBack, facingFlip);
-    // 足音
-    stepTimer -= dt;
-    if (stepTimer <= 0) { Audio.sfx('step'); stepTimer = dash ? 0.22 : 0.34; }
-    // 遭遇判定（草むらゾーン内）
-    checkEncounter(dt, nx, nz, dash);
-  } else {
-    walkAnim = 0;
-    setFrame(0, lastBack, facingFlip);
   }
- } // フィールド時のみ入力/移動
-  player.position.y = 2.3 + Math.sin(t * 2.2) * 0.04; // 待機の浮遊
-  player.rotation.y = camYaw; // 常にカメラを向くビルボード
-  playerBlob.position.set(player.position.x, 0.42, player.position.z);
 
-  // --- NPCのビルボード/待機 + 交互作用ターゲット ---
-  for (const n of npcs) { n.mesh.rotation.y = camYaw; n.mesh.position.y = 2.3 + Math.sin(t * 1.8 + n.wanderT) * 0.05; }
+  // --- 基底とプレイヤー配置（フィールド外でも安定して見せる）---
+  planetBasis();
+  player.position.copy(pDir).multiplyScalar(PLANET_R + PLAYER_LIFT + Math.sin(t * 2.2) * 0.04);
+
+  // --- カメラ（惑星の上を周回する三人称）---
+  _foot.copy(pDir).multiplyScalar(PLANET_R + 1.4);
+  _off.copy(_up).multiplyScalar(Math.sin(camPitch)).addScaledVector(_fwd, -Math.cos(camPitch));
+  camera.position.copy(_foot).addScaledVector(_off, camDist * aspectFit);
+  camera.up.copy(_up);
+  camera.lookAt(_foot);
+
+  surfaceBillboard(player, pDir); // カメラ位置確定後に向ける
+
+  // --- NPC/装飾の地表ビルボード ---
+  for (const n of npcs) { n.mesh.position.copy(surfPos(n.dir, 1.55 + Math.sin(t * 1.8 + n.wanderT) * 0.05)); surfaceBillboard(n.mesh, n.dir); }
+  for (const b of surfBills) surfaceBillboard(b.mesh, b.dir);
   nearTarget = findInteract();
   updatePrompt();
 
-  // --- カメラ追従 ---
-  camTarget.lerp(tmp.set(player.position.x, 1.4, player.position.z), 1 - Math.pow(0.001, dt));
-  const cp = new THREE.Vector3(
-    Math.sin(camYaw) * Math.cos(camPitch),
-    Math.sin(camPitch),
-    Math.cos(camYaw) * Math.cos(camPitch)
-  ).multiplyScalar(camDist * aspectFit);
-  camera.position.copy(camTarget).add(cp);
-  camera.lookAt(camTarget);
-
-  // --- ビルボード（木/花/岩をカメラに向ける：Y軸のみ） ---
-  for (const tr of trees) tr.rotation.y = camYaw;
-  for (const b of flatBillboards) b.rotation.y = camYaw;
-
-  // --- DOFのピントをプレイヤー距離に ---
+  // --- DOFのピント ---
   bokeh.uniforms['focus'].value = camera.position.distanceTo(player.position);
 
   // --- シェーダー時間 ---
-  waterUniforms.uTime.value = t;
   grassU.uTime.value = t;
   ffMat.uniforms.uTime.value = t;
   skyUniforms.uTime.value = t;
   mistUniforms.uTime.value = t;
   petals.material.uniforms.uTime.value = t;
   rain.material.uniforms.uTime.value = t;
-  // 天候の追従（プレイヤー周辺に）
-  petals.position.x = rain.position.x = player.position.x;
-  petals.position.z = rain.position.z = player.position.z;
+  // 天候はプレイヤーの真上から降らせる
+  petals.position.copy(player.position); rain.position.copy(player.position);
+  petals.quaternion.setFromUnitVectors(UPVEC, pDir); rain.quaternion.copy(petals.quaternion);
 
-  // 太陽ターゲットをプレイヤー付近に
-  sun.target.position.set(player.position.x, 0, player.position.z);
+  // 太陽は惑星中心を照らす（歩くと昼/夜の境界を越えられる）
+  sun.target.position.set(0, 0, 0);
   applyTimeOfDay(timeOfDay);
   if (Audio.audioReady()) Audio.setMood(dayNightMood());
 }
@@ -1100,7 +982,7 @@ function animate() {
 }
 
 // 起動時にエリア名を表示
-setTimeout(() => showArea('街の広場', 'TOWN SQUARE'), 600);
+setTimeout(() => showArea('まるい大地', 'TINY PLANET'), 600);
 
 // 起動
 applyTimeOfDay(timeOfDay);
