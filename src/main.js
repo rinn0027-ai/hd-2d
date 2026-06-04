@@ -8,7 +8,6 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as P from './procedural.js';
 import * as M from './models.js';
-import { createBattle, ENEMY_TYPES } from './battle.js';
 import * as Audio from './audio.js';
 
 // ============================================================ renderer
@@ -400,10 +399,6 @@ function addChest(dir, reward) {
 addChest(new THREE.Vector3(-0.6, -0.3, -0.6).normalize(), { potions: 2 });
 addChest(new THREE.Vector3(0.7, -0.5, 0.4).normalize(), { potions: 1 });
 
-// ============================================================ 遭遇ゾーン（草むらの球面キャップ）
-const encounterZones = [];
-for (let i = 0; i < 5; i++) encounterZones.push({ dir: randDir(), ang: 0.3 });
-
 // ============================================================ 花・岩（3D）
 const flowerColors = [0xffd23a, 0xff7a9c, 0xc08aff, 0xff9a4a, 0xffffff];
 for (let i = 0, tries = 0; i < 34 && tries < 500; tries++) {
@@ -472,10 +467,9 @@ composer.addPass(gradePass);
 composer.addPass(new OutputPass());
 
 // ============================================================ ゲーム状態 / ステータス
-let gameState = 'field';                 // 'field' | 'dialogue' | 'battle'
-const hero = { hp: 60, maxHp: 60, sp: 12, maxSp: 12, potions: 1, exp: 0 };
-const battle = createBattle({ renderPass, bokeh, heroPal: undefined });
-let stepsSinceBattle = 0;                // 遭遇クールダウン用
+let gameState = 'field';                 // 'field' | 'dialogue'
+const hero = { hp: 100, maxHp: 100, exp: 0, level: 1, potions: 1 };
+function expToNext(lv) { return 20 + lv * 18; }
 
 // ============================================================ 対話システム（タイプライタ）
 const dlgEl = document.getElementById('dialogue');
@@ -535,29 +529,87 @@ function flash(color = '#fff', peak = 0.9) {
 // 昼夜でBGMの雰囲気を切替
 function dayNightMood() { return (Math.abs(timeOfDay - 0.5) * 2 > 0.55) ? 'night' : 'day'; }
 
-// ============================================================ バトル起動
-async function triggerBattle() {
-  if (gameState !== 'field') return;
-  gameState = 'battle';
-  document.getElementById('btnA').classList.remove('show');
-  document.getElementById('hint').style.opacity = '0';
-  Audio.sfx('encounter');
-  await flash('#fff', 0.95);
-  await flash('#fff', 0.7);
-  const type = ENEMY_TYPES[Math.floor(Math.random() * ENEMY_TYPES.length)];
-  const result = await battle.start(type, hero);
-  await flash('#000', 0.85);
-  if (result === 'win') { hero.exp += 10; hero.sp = Math.min(hero.maxSp, hero.sp + 4); }
-  else if (result === 'lose') {
-    // 全回復して街へ戻す
-    hero.hp = hero.maxHp; hero.sp = hero.maxSp;
-    pDir.set(0, 1, 0);
-    showArea('スタート地点', 'RESPAWN');
+// ============================================================ 即時戦闘（フィールド上）
+const ENEMY_DEF = {
+  slime:    { hp: 18, atk: 7,  exp: 8,  scale: 1.3, speed: 1.9, hover: 0,   atkRange: 2.2, aggro: 9 },
+  mushroom: { hp: 32, atk: 12, exp: 16, scale: 1.4, speed: 1.4, hover: 0,   atkRange: 2.5, aggro: 8 },
+  bat:      { hp: 13, atk: 8,  exp: 12, scale: 1.2, speed: 2.9, hover: 1.4, atkRange: 2.1, aggro: 12 },
+};
+const ENEMY_KINDS = Object.keys(ENEMY_DEF);
+const enemies = [];
+const MAX_ENEMIES = 7;
+function spawnEnemy(kind, dir) {
+  const def = ENEMY_DEF[kind];
+  const e = M.makeEnemy(kind);
+  e.root.scale.setScalar(def.scale);
+  scene.add(e.root);
+  enemies.push({ model: e, kind, def, dir: dir.clone().normalize(), hp: def.hp, maxHp: def.hp, alive: true, atkCD: Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0 });
+}
+function spawnWave() {
+  let guard = 0;
+  while (enemies.filter(e => e.alive).length < MAX_ENEMIES && guard++ < 30) {
+    let d = randDir();
+    for (let k = 0; k < 20; k++) { d = randDir(); if (pDir.dot(d) < 0.55 && !nearObstacle(d, 0.05)) break; }
+    spawnEnemy(ENEMY_KINDS[Math.floor(Math.random() * ENEMY_KINDS.length)], d);
   }
-  stepsSinceBattle = 0;
-  // フィールドBGMに戻す
-  Audio.setMood(dayNightMood());
-  gameState = 'field';
+}
+
+// 浮遊ダメージ表示
+function showDmg(worldPos, val, cls = '') {
+  const v = worldPos.clone().project(camera);
+  if (v.z > 1) return;
+  const x = (v.x * 0.5 + 0.5) * innerWidth, y = (-v.y * 0.5 + 0.5) * innerHeight;
+  const el = document.createElement('div');
+  el.className = 'dmgNum ' + cls; el.textContent = (cls === 'heal' ? '+' : '') + val;
+  el.style.left = (x - 12) + 'px'; el.style.top = (y - 12) + 'px';
+  el.style.animation = 'floatUp .8s ease forwards';
+  document.body.appendChild(el); setTimeout(() => el.remove(), 820);
+}
+
+// HUD
+const hudHp = document.getElementById('hudHp'), hudHpTxt = document.getElementById('hudHpTxt'), hudLv = document.getElementById('hudLv'), hudExp = document.getElementById('hudExp');
+function updateHUD() {
+  hudHp.style.width = Math.max(0, hero.hp / hero.maxHp * 100) + '%';
+  hudHpTxt.textContent = `HP ${Math.max(0, Math.ceil(hero.hp))}/${hero.maxHp}`;
+  hudLv.textContent = 'Lv ' + hero.level;
+  hudExp.textContent = `EXP ${hero.exp}/${expToNext(hero.level)}`;
+}
+function gainExp(n) {
+  hero.exp += n;
+  while (hero.exp >= expToNext(hero.level)) {
+    hero.exp -= expToNext(hero.level); hero.level++; hero.maxHp += 14; hero.hp = hero.maxHp;
+    Audio.sfx('victory'); showArea('レベルアップ！ Lv ' + hero.level, 'LEVEL UP');
+  }
+  updateHUD();
+}
+
+// アクション状態
+let dashT = 0, dashCD = 0, jumpH = 0, jumpV = 0, grounded = true;
+let attackT = 0, attackCD = 0, attackHit = false, invulnT = 0, hurtFlash = 0;
+const ATTACK_DUR = 0.34, ATTACK_RANGE = 3.6, JUMP_V = 7.5, GRAVITY = 20, DASH_T = 0.22, DASH_SPEED = 22, DASH_CD = 0.55;
+
+function doAttack() {
+  if (gameState !== 'field' || attackCD > 0) return;
+  attackT = ATTACK_DUR; attackCD = 0.42; attackHit = false; Audio.sfx('attack');
+}
+function doJump() {
+  if (gameState === 'field' && grounded) { jumpV = JUMP_V; grounded = false; Audio.sfx('cursor'); }
+}
+function doDash() {
+  if (gameState === 'field' && dashCD <= 0) { dashT = DASH_T; dashCD = DASH_CD; invulnT = Math.max(invulnT, DASH_T + 0.05); Audio.sfx('skill'); }
+}
+function hurtPlayer(dmg, fromDir) {
+  if (invulnT > 0 || dashT > 0) return;
+  hero.hp -= dmg; invulnT = 0.7; hurtFlash = 0.3; Audio.sfx('hit');
+  showDmg(player.position.clone().addScaledVector(pDir, 2.6), Math.round(dmg));
+  if (fromDir) { _axis.crossVectors(pDir, fromDir).normalize(); pDir.applyAxisAngle(_axis, -0.05).normalize(); }
+  updateHUD();
+  if (hero.hp <= 0) respawnPlayer();
+}
+function respawnPlayer() {
+  hero.hp = hero.maxHp; pDir.set(0, 1, 0); invulnT = 1.4; jumpH = 0; jumpV = 0; grounded = true;
+  for (const e of enemies) if (e.alive && pDir.dot(e.dir) > 0.3) e.dir.copy(randDir());
+  showArea('やられた… 復活', 'RESPAWN');
 }
 
 // ============================================================ 交互作用（最寄りのNPC/宝箱）
@@ -568,10 +620,7 @@ function findInteract() {
   for (const c of chests) { if (c.opened) continue; const dt = pDir.dot(c.dir); if (dt > bestDot) { bestDot = dt; best = { type: 'chest', ref: c }; } }
   return best;
 }
-function interact() {
-  if (gameState === 'dialogue') { Audio.sfx('cursor'); advanceDialogue(); return; }
-  if (gameState !== 'field') return;
-  if (!nearTarget) return;
+function interactTarget() {
   if (nearTarget.type === 'npc') { Audio.sfx('confirm'); startDialogue(nearTarget.ref.name, nearTarget.ref.lines); }
   else if (nearTarget.type === 'chest') {
     const c = nearTarget.ref; c.opened = true; c.lidPivot.rotation.x = -1.2;
@@ -580,10 +629,20 @@ function interact() {
     startDialogue('たからばこ', [`やくそうを ${got}個 みつけた！`]);
   }
 }
+// F/Enter: 会話送り or 近くの対象と交互作用
+function interact() {
+  if (gameState === 'dialogue') { Audio.sfx('cursor'); advanceDialogue(); return; }
+  if (gameState === 'field' && nearTarget) interactTarget();
+}
+// Aボタン: 会話中=送り / 対象が近い=交互作用 / それ以外=攻撃
+function actionA() {
+  if (gameState === 'dialogue') { Audio.sfx('cursor'); advanceDialogue(); return; }
+  if (gameState !== 'field') return;
+  if (nearTarget) interactTarget(); else doAttack();
+}
 
 // ============================================================ 入力
 const keys = {};
-// 最初の操作でオーディオ起動（自動再生制限対策）
 function kickAudio() { Audio.ensureAudio(); }
 addEventListener('keydown', kickAudio, { once: true });
 addEventListener('pointerdown', kickAudio, { once: true });
@@ -592,19 +651,30 @@ addEventListener('touchstart', kickAudio, { once: true });
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   keys[k] = true;
-  if (k === ' ' || k === 'enter' || k === 'f') { interact(); e.preventDefault(); } // 決定（QとEはカメラ回転に使用）
+  if (k === 'j') { doAttack(); }
+  else if (k === ' ') { doJump(); e.preventDefault(); }
+  else if (k === 'k') { doDash(); }
+  else if (k === 'f' || k === 'enter') { interact(); e.preventDefault(); }
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 addEventListener('wheel', e => { camDist = THREE.MathUtils.clamp(camDist + Math.sign(e.deltaY) * 3, 12, 95); }, { passive: true });
 
-// モバイル決定ボタン
+// アクションボタン
 const btnA = document.getElementById('btnA');
-btnA.addEventListener('click', e => { e.preventDefault(); interact(); });
-btnA.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); interact(); }, { passive: false });
+const btnJump = document.getElementById('btnJump');
+const btnDash = document.getElementById('btnDash');
+function bindBtn(btn, fn) {
+  btn.addEventListener('click', e => { e.preventDefault(); fn(); });
+  btn.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); fn(); }, { passive: false });
+}
+bindBtn(btnA, actionA); bindBtn(btnJump, doJump); bindBtn(btnDash, doDash);
 
-// デスクトップ: 会話中はクリックで送り
+// デスクトップ: クリックで 会話送り or 攻撃
 addEventListener('pointerdown', e => {
-  if (e.pointerType === 'mouse' && gameState === 'dialogue' && !e.target.closest('#panel, #ui')) interact();
+  if (e.pointerType !== 'mouse') return;
+  if (e.target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash')) return;
+  if (gameState === 'dialogue') advanceDialogue();
+  else if (gameState === 'field') doAttack();
 });
 
 // ============================================================ タッチ操作（スマホ）
@@ -637,7 +707,7 @@ function endJoy() {
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #bMenu, #btnA')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash')); }
 
 // タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
 function assignRoles() {
@@ -660,7 +730,6 @@ function assignRoles() {
 addEventListener('touchstart', e => {
   if (onUI(e.target)) return;                    // スライダー/メニュー等はそのまま操作
   if (gameState === 'dialogue') { e.preventDefault(); interact(); return; } // タップで送り
-  if (gameState === 'battle') { e.preventDefault(); return; }              // 視点は battle.js が処理
   for (const t of e.changedTouches) touchMap.set(t.identifier, { x: t.clientX, y: t.clientY });
   assignRoles();
   e.preventDefault();
@@ -813,26 +882,17 @@ onResize();
 const clock = new THREE.Clock();
 let facingFlip = false, lastBack = false, walkAnim = 0, stepTimer = 0;
 
-// 草むら（球面キャップ）での遭遇判定 — 遭遇率は高め
-function checkEncounter(dt, dash) {
-  let inZone = false;
-  for (const z2 of encounterZones) { if (pDir.dot(z2.dir) > Math.cos(z2.ang)) { inZone = true; break; } }
-  if (!inZone) { stepsSinceBattle = Math.max(0, stepsSinceBattle - dt * 2); return; }
-  stepsSinceBattle += dt * (dash ? 1.3 : 1.0);
-  if (stepsSinceBattle > 1.4 && Math.random() < dt * 0.35) triggerBattle();
-}
-
-// 交互作用プロンプト（モバイル=決定ボタン / デスクトップ=テキストヒント）
+// アクションプロンプト（Aボタンは攻撃/交互作用の文脈表示）
 const hintEl = document.getElementById('hint');
 function updatePrompt() {
-  const show = gameState === 'dialogue' || (gameState === 'field' && !!nearTarget);
-  const verb = gameState === 'dialogue' ? '送る' : (nearTarget && nearTarget.type === 'chest' ? '調べる' : '話す');
+  const verb = gameState === 'dialogue' ? '送る' : (nearTarget ? (nearTarget.type === 'chest' ? '調べる' : '話す') : '攻撃');
   if (isTouch) {
-    btnA.classList.toggle('show', show);
+    btnA.classList.add('show');
     btnA.textContent = gameState === 'dialogue' ? '▼' : verb;
   } else {
+    const show = gameState === 'dialogue' || (gameState === 'field' && !!nearTarget);
     hintEl.style.opacity = show ? '1' : '0';
-    hintEl.textContent = (gameState === 'dialogue' ? '［Space / クリック］ ' : '［Space / F］ ') + verb;
+    hintEl.textContent = gameState === 'dialogue' ? '［F / クリック］ 送る' : '［F］ ' + verb;
   }
 }
 
@@ -867,7 +927,60 @@ function orientStanding(obj, up, fwd) {
   obj.quaternion.setFromRotationMatrix(_m);
 }
 
+// 敵AI + 攻撃判定（フィールド）
+function combatUpdate(dt, t) {
+  // プレイヤー攻撃のヒット判定（振りの中盤で1回）
+  if (attackT > 0 && !attackHit && attackT < ATTACK_DUR * 0.66) {
+    attackHit = true;
+    const co = Math.cos(ATTACK_RANGE / PLANET_R);
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const d = pDir.dot(e.dir); if (d < co) continue;
+      _md.copy(e.dir).addScaledVector(pDir, -d);            // player→enemy tangent
+      if (_md.lengthSq() < 1e-6 || _md.normalize().dot(heading) < 0.2) continue;
+      const dmg = 8 + hero.level * 2 + Math.floor(Math.random() * 5);
+      const crit = Math.random() < 0.2; const tot = crit ? dmg * 2 : dmg;
+      e.hp -= tot; e.hitFlash = 0.18;
+      showDmg(e.model.root.position.clone().addScaledVector(e.dir, 1.8), tot, crit ? 'crit' : '');
+      Audio.sfx('hit');
+      _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.07).normalize();
+      if (e.hp <= 0) { e.alive = false; e.dead = 0.5; gainExp(e.def.exp); Audio.sfx('chest'); }
+    }
+  }
+  // 敵の挙動
+  for (const e of enemies) {
+    if (!e.alive) {
+      if (e.dead > 0) { e.dead -= dt; e.model.root.scale.setScalar(Math.max(0.001, e.def.scale * e.dead * 2)); if (e.dead <= 0) e.model.root.visible = false; }
+      continue;
+    }
+    if (e.atkCD > 0) e.atkCD -= dt; e.bobT += dt;
+    const d = THREE.MathUtils.clamp(pDir.dot(e.dir), -1, 1);
+    const angDist = Math.acos(d) * PLANET_R;
+    if (angDist < e.def.aggro) {                          // 追尾
+      if (angDist > e.def.atkRange) {
+        _axis.crossVectors(e.dir, pDir).normalize();
+        e.dir.applyAxisAngle(_axis, Math.min(e.def.speed * dt / PLANET_R, angDist / PLANET_R)).normalize();
+      } else if (e.atkCD <= 0) { e.atkCD = 1.3; hurtPlayer(e.def.atk, e.dir); }
+    } else {                                              // 徘徊
+      if (!e.wander || e.wanderCD <= 0) { e.wander = randDir(); e.wanderCD = 2 + Math.random() * 2; }
+      e.wanderCD -= dt;
+      _axis.crossVectors(e.dir, e.wander).normalize();
+      e.dir.applyAxisAngle(_axis, e.def.speed * 0.4 * dt / PLANET_R).normalize();
+    }
+    const bob = (e.def.hover ? 0.3 : 0.12) * Math.sin(e.bobT * 2.2);
+    e.model.root.position.copy(surfPos(e.dir, e.def.hover + bob));
+    _md.copy(pDir).addScaledVector(e.dir, -d);
+    orientStanding(e.model.root, e.dir, _md.lengthSq() > 1e-6 ? _md : heading);
+  }
+  if (enemies.filter(e => e.alive).length < 3) spawnWave();
+}
+
 function update(dt, t) {
+  // タイマー
+  if (dashT > 0) dashT -= dt; if (dashCD > 0) dashCD -= dt;
+  if (attackT > 0) attackT -= dt; if (attackCD > 0) attackCD -= dt;
+  if (invulnT > 0) invulnT -= dt; if (hurtFlash > 0) hurtFlash -= dt;
+
   let ix = 0, iy = 0, dash = false, playerMoving = false;
   if (gameState === 'field') {
     if (keys['q']) camRot += dt * 1.4;
@@ -884,29 +997,39 @@ function update(dt, t) {
     if (inMag > 1) { ix /= inMag; iy /= inMag; }
     dash = keys['shift'] || joyVec.mag > 0.9;
     const speed = dash ? 11 : 6;
-    playerMoving = inMag > 0.05;
+    playerMoving = inMag > 0.05 || dashT > 0;
     if (playerMoving) {
-      const arc = speed * dt * Math.min(1, inMag) / PLANET_R;
-      _md.copy(_fwd).multiplyScalar(iy).addScaledVector(_right, ix).normalize();
-      heading.copy(_md);                                   // 進行方向を向く
-      if (!tryMove(_md, arc)) {                            // 直進が塞がれたら滑って回り込む
-        const slid = _md.clone();
-        if (!tryMove(slid.copy(_md).applyAxisAngle(_up, 0.6), arc))
-          tryMove(slid.copy(_md).applyAxisAngle(_up, -0.6), arc);
+      let dir3, arc;
+      if (dashT > 0) { dir3 = heading; arc = DASH_SPEED * dt / PLANET_R; }
+      else {
+        _md.copy(_fwd).multiplyScalar(iy).addScaledVector(_right, ix).normalize();
+        heading.copy(_md); dir3 = _md; arc = speed * dt * Math.min(1, inMag) / PLANET_R;
       }
-      stepTimer -= dt;
-      if (stepTimer <= 0) { Audio.sfx('step'); stepTimer = dash ? 0.22 : 0.34; }
-      checkEncounter(dt, dash);
+      if (!tryMove(dir3, arc)) {                           // 直進が塞がれたら滑って回り込む
+        const slid = dir3.clone();
+        if (!tryMove(slid.copy(dir3).applyAxisAngle(_up, 0.6), arc))
+          tryMove(slid.copy(dir3).applyAxisAngle(_up, -0.6), arc);
+      }
+      if (dashT <= 0) { stepTimer -= dt; if (stepTimer <= 0) { Audio.sfx('step'); stepTimer = dash ? 0.22 : 0.34; } }
     }
+    combatUpdate(dt, t);
   } else {
     camRot = 0;
   }
 
+  // --- ジャンプ物理（法線方向）---
+  if (!grounded || jumpV !== 0) {
+    jumpV -= GRAVITY * dt; jumpH += jumpV * dt;
+    if (jumpH <= 0) { jumpH = 0; jumpV = 0; grounded = true; }
+  }
+
   // --- 基底とプレイヤー配置 ---
   planetBasis();
-  player.position.copy(pDir).multiplyScalar(PLANET_R + PLAYER_LIFT + Math.sin(t * 2.2) * 0.04);
+  player.position.copy(pDir).multiplyScalar(PLANET_R + PLAYER_LIFT + jumpH + Math.sin(t * 2.2) * 0.04);
   orientStanding(player, _up, heading);
-  playerModel.update(dt, playerMoving, dash ? 1.4 : 1.0);
+  const attackP = attackT > 0 ? (1 - attackT / ATTACK_DUR) : 0;
+  playerModel.update(dt, playerMoving && jumpH < 0.1, dash ? 1.4 : 1.0, attackP);
+  player.visible = !(invulnT > 0 && Math.floor(t * 20) % 2 === 0); // 無敵中は点滅
 
   // --- カメラ（惑星の上を周回する三人称）---
   _foot.copy(pDir).multiplyScalar(PLANET_R + 1.4);
@@ -944,8 +1067,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
-  if (gameState === 'battle') { if (battle.isActive()) battle.update(dt, t); }
-  else update(dt, t);
+  update(dt, t);
   updateDialogue(dt);
   gradePass.uniforms.uTime.value = (t * 9) % 100 + 1; // グレインは常時更新
   composer.render();
@@ -955,6 +1077,8 @@ function animate() {
 setTimeout(() => showArea('まるい大地', 'TINY PLANET'), 600);
 
 // 起動
+updateHUD();
+spawnWave();
 applyTimeOfDay(timeOfDay);
 animate();
 const loading = document.getElementById('loading');

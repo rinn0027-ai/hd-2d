@@ -97,6 +97,29 @@
     #btnA:active { transform: scale(.94); }
     #btnA.show { display: block; }
 
+    /* アクションボタン（ジャンプ/ダッシュ） */
+    .actBtn {
+      position: fixed; z-index: 9; width: 62px; height: 62px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.28); color: #eaf2ff; font-weight: 800; font-size: 12px; letter-spacing: .06em;
+      background: radial-gradient(circle at 38% 34%, rgba(120,150,200,.95), rgba(60,80,120,.92));
+      box-shadow: 0 4px 14px rgba(0,0,0,.5); display: none; pointer-events: auto; user-select: none;
+    }
+    .actBtn:active { transform: scale(.94); }
+    body.touch .actBtn { display: block; }
+    #btnJump { right: 110px; bottom: 92px; }
+    #btnDash { right: 30px; bottom: 196px; background: radial-gradient(circle at 38% 34%, rgba(120,200,170,.95), rgba(50,120,95,.92)); }
+
+    /* プレイヤーHUD */
+    #hud {
+      position: fixed; left: 16px; top: 70px; z-index: 10; width: 188px;
+      font-family: ui-monospace, Menlo, Consolas, monospace; color: #eaf2ff; pointer-events: none;
+      text-shadow: 0 2px 6px rgba(0,0,0,.8);
+    }
+    #hud .lv { font-size: 12px; font-weight: 700; letter-spacing: .08em; margin-bottom: 3px; }
+    #hud .hpbar { height: 12px; border-radius: 6px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.18); overflow: hidden; }
+    #hud .hpbar > i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg,#3ad17a,#7ef0a0); transition: width .2s; }
+    #hud .hptxt { font-size: 11px; opacity: .8; margin-top: 2px; }
+
     /* デスクトップ用 交互作用ヒント */
     #hint {
       position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 11;
@@ -203,8 +226,16 @@
   <div id="joyBase"><div id="joyKnob"></div></div>
   <div id="touchHint">左: 移動（強く倒すとダッシュ）<br/>右: ドラッグで視点 / 2本指でズーム</div>
 
-  <button id="btnA" class="gfont">話す</button>
+  <button id="btnA" class="gfont">攻撃</button>
+  <button id="btnJump" class="actBtn gfont">JUMP</button>
+  <button id="btnDash" class="actBtn gfont">DASH</button>
   <div id="hint" class="gfont"></div>
+
+  <div id="hud" class="gfont">
+    <div class="lv"><span id="hudLv">Lv 1</span> &nbsp; <span id="hudExp" style="opacity:.7"></span></div>
+    <div class="hpbar"><i id="hudHp"></i></div>
+    <div class="hptxt"><span id="hudHpTxt"></span></div>
+  </div>
 
   <div id="areaToast" class="gfont"></div>
 

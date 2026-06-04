@@ -49,16 +49,25 @@ export function makeHumanoid(opts = {}) {
 
   shadowAll(root);
   let phase = 0;
-  function update(dt, moving, speed = 1) {
+  function update(dt, moving, speed = 1, attackP = 0) {
     if (moving) {
       phase += dt * speed * 8;
       const s = Math.sin(phase) * 0.5;
       legL.rotation.x = s; legR.rotation.x = -s;
-      armL.rotation.x = -s; armR.rotation.x = s;
+      if (attackP <= 0) { armL.rotation.x = -s; armR.rotation.x = s; }
       body.position.y = 1.12 + Math.abs(Math.sin(phase)) * 0.03;
     } else {
-      legL.rotation.x = legR.rotation.x = armL.rotation.x = armR.rotation.x = 0;
+      legL.rotation.x = legR.rotation.x = 0;
       body.position.y = 1.12;
+      if (attackP <= 0) { armL.rotation.x = armR.rotation.x = 0; }
+    }
+    if (attackP > 0) {                       // 攻撃の振り
+      const sw = Math.sin(Math.min(1, attackP) * Math.PI);
+      armR.rotation.x = -2.4 * sw;
+      armR.rotation.z = -0.4 * sw;
+      armL.rotation.x = 0.5 * sw;
+    } else {
+      armR.rotation.z = 0;
     }
   }
   return { root, update, height: 2.4 };
