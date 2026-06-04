@@ -60,6 +60,9 @@ scene.add(sun);
 scene.add(sun.target);
 const ambient = new THREE.AmbientLight(0x405070, 0.3);
 scene.add(ambient);
+// プレイヤー追従ライト（夜でも主役が見えるように）
+const playerLight = new THREE.PointLight(0xfff0d0, 0.0, 16, 2);
+scene.add(playerLight);
 
 // ============================================================ 空ドーム（グラデ + 太陽 + 流雲）
 const skyUniforms = {
@@ -536,21 +539,59 @@ const ENEMY_DEF = {
   bat:      { hp: 13, atk: 8,  exp: 12, scale: 1.2, speed: 2.9, hover: 1.4, atkRange: 2.1, aggro: 12 },
 };
 const ENEMY_KINDS = Object.keys(ENEMY_DEF);
+const BOSS_DEF = { hp: 220, atk: 20, exp: 120, scale: 3.2, speed: 1.5, hover: 0, atkRange: 4.2, aggro: 999 };
 const enemies = [];
 const MAX_ENEMIES = 7;
+let killCount = 0, bossRef = null;
+
+function collectMats(root) { const a = []; root.traverse(o => { if (o.isMesh && o.material && o.material.emissive) a.push(o.material); }); return a; }
+
 function spawnEnemy(kind, dir) {
   const def = ENEMY_DEF[kind];
   const e = M.makeEnemy(kind);
   e.root.scale.setScalar(def.scale);
   scene.add(e.root);
-  enemies.push({ model: e, kind, def, dir: dir.clone().normalize(), hp: def.hp, maxHp: def.hp, alive: true, atkCD: Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0 });
+  enemies.push({ model: e, kind, def, dir: dir.clone().normalize(), hp: def.hp, maxHp: def.hp, alive: true, atkCD: Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, mats: collectMats(e.root) });
+}
+function spawnBoss() {
+  const e = M.makeBoss();
+  e.root.scale.setScalar(BOSS_DEF.scale);
+  scene.add(e.root);
+  let d = randDir(); for (let k = 0; k < 20; k++) { d = randDir(); if (pDir.dot(d) < 0.3) break; }
+  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, dir: d.clone().normalize(), hp: BOSS_DEF.hp, maxHp: BOSS_DEF.hp, alive: true, atkCD: 2, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats: collectMats(e.root) };
+  enemies.push(bossRef);
+  Audio.sfx('encounter');
+  document.getElementById('bossName').textContent = '◆ スライム王 KING SLIME ◆';
+  bossbarEl.style.display = 'block';
+  showArea('ボスが あらわれた！', 'BOSS');
 }
 function spawnWave() {
   let guard = 0;
-  while (enemies.filter(e => e.alive).length < MAX_ENEMIES && guard++ < 30) {
+  while (enemies.filter(e => e.alive && !e.isBoss).length < MAX_ENEMIES && guard++ < 30) {
     let d = randDir();
     for (let k = 0; k < 20; k++) { d = randDir(); if (pDir.dot(d) < 0.55 && !nearObstacle(d, 0.05)) break; }
     spawnEnemy(ENEMY_KINDS[Math.floor(Math.random() * ENEMY_KINDS.length)], d);
+  }
+}
+const bossbarEl = document.getElementById('bossbar'), bossHpEl = document.getElementById('bossHp');
+
+// ヒット火花エフェクト（追加合成スプライトのプール）
+const fxList = [];
+function spawnImpact(pos, color = 0xfff2c0, n = 6) {
+  for (let i = 0; i < n; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+    sp.position.copy(pos);
+    const v = new THREE.Vector3((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5)).normalize().multiplyScalar(4 + Math.random() * 4);
+    sp.scale.setScalar(0.8 + Math.random());
+    scene.add(sp); fxList.push({ sp, v, life: 0.3, max: 0.3 });
+  }
+}
+function updateEffects(dt) {
+  for (let i = fxList.length - 1; i >= 0; i--) {
+    const f = fxList[i]; f.life -= dt;
+    if (f.life <= 0) { scene.remove(f.sp); f.sp.material.dispose(); fxList.splice(i, 1); continue; }
+    f.sp.position.addScaledVector(f.v, dt); f.v.multiplyScalar(0.88);
+    const k = f.life / f.max; f.sp.material.opacity = k; f.sp.scale.setScalar((0.4 + (1 - k) * 1.6));
   }
 }
 
@@ -585,12 +626,37 @@ function gainExp(n) {
 
 // アクション状態
 let dashT = 0, dashCD = 0, jumpH = 0, jumpV = 0, grounded = true;
-let attackT = 0, attackCD = 0, attackHit = false, invulnT = 0, hurtFlash = 0;
-const ATTACK_DUR = 0.34, ATTACK_RANGE = 3.6, JUMP_V = 7.5, GRAVITY = 20, DASH_T = 0.22, DASH_SPEED = 22, DASH_CD = 0.55;
+let attackT = 0, attackCD = 0, attackHit = false, invulnT = 0, hurtFlash = 0, shakeT = 0;
+let comboCount = 0, comboTimer = 0, comboHeavy = false;
+let skillT = 0, skillCD = 0;
+const ATTACK_DUR = 0.32, ATTACK_RANGE = 3.6, JUMP_V = 7.5, GRAVITY = 20, DASH_T = 0.22, DASH_SPEED = 22, DASH_CD = 0.55;
+const SKILL_DUR = 0.5, SKILL_CD = 3.5, SKILL_RANGE = 6.0;
+const hurtEl = document.getElementById('hurt');
 
 function doAttack() {
-  if (gameState !== 'field' || attackCD > 0) return;
-  attackT = ATTACK_DUR; attackCD = 0.42; attackHit = false; Audio.sfx('attack');
+  if (gameState !== 'field' || attackCD > 0 || skillT > 0) return;
+  comboCount = (comboTimer > 0) ? (comboCount % 3) + 1 : 1;  // 1→2→3 の連舞
+  comboTimer = 0.7; comboHeavy = comboCount >= 3;
+  attackT = ATTACK_DUR; attackCD = comboHeavy ? 0.5 : 0.32; attackHit = false;
+  Audio.sfx(comboHeavy ? 'skill' : 'attack');
+}
+function doSkill() {
+  if (gameState !== 'field' || skillCD > 0) return;
+  skillT = SKILL_DUR; skillCD = SKILL_CD; invulnT = Math.max(invulnT, 0.35);
+  Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
+  spawnImpact(player.position.clone().addScaledVector(pDir, 1.0), 0xbf8aff, 14);
+  // 周囲360°に大ダメージ
+  const co = Math.cos(SKILL_RANGE / PLANET_R);
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if (pDir.dot(e.dir) < co) continue;
+    const dmg = 22 + hero.level * 3;
+    e.hp -= dmg; e.hitFlash = 0.2;
+    showDmg(e.model.root.position.clone().addScaledVector(e.dir, 1.8), dmg, 'crit');
+    spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.2), 0xbf8aff, 5);
+    _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.12).normalize();
+    if (e.hp <= 0) killEnemy(e);
+  }
 }
 function doJump() {
   if (gameState === 'field' && grounded) { jumpV = JUMP_V; grounded = false; Audio.sfx('cursor'); }
@@ -600,7 +666,7 @@ function doDash() {
 }
 function hurtPlayer(dmg, fromDir) {
   if (invulnT > 0 || dashT > 0) return;
-  hero.hp -= dmg; invulnT = 0.7; hurtFlash = 0.3; Audio.sfx('hit');
+  hero.hp -= dmg; invulnT = 0.7; hurtFlash = 0.4; shakeT = Math.max(shakeT, 0.25); Audio.sfx('hit');
   showDmg(player.position.clone().addScaledVector(pDir, 2.6), Math.round(dmg));
   if (fromDir) { _axis.crossVectors(pDir, fromDir).normalize(); pDir.applyAxisAngle(_axis, -0.05).normalize(); }
   updateHUD();
@@ -610,6 +676,19 @@ function respawnPlayer() {
   hero.hp = hero.maxHp; pDir.set(0, 1, 0); invulnT = 1.4; jumpH = 0; jumpV = 0; grounded = true;
   for (const e of enemies) if (e.alive && pDir.dot(e.dir) > 0.3) e.dir.copy(randDir());
   showArea('やられた… 復活', 'RESPAWN');
+}
+function killEnemy(e) {
+  e.alive = false; e.dead = 0.5; gainExp(e.def.exp);
+  spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.0), 0xffd27a, 10);
+  if (e.isBoss) {
+    bossRef = null; bossbarEl.style.display = 'none'; killCount = 0;
+    hero.hp = hero.maxHp; updateHUD();
+    Audio.sfx('victory'); showArea('スライム王を たおした！', 'BOSS DEFEATED');
+  } else {
+    Audio.sfx('chest');
+    killCount++;
+    if (killCount >= 8 && !bossRef) spawnBoss();
+  }
 }
 
 // ============================================================ 交互作用（最寄りのNPC/宝箱）
@@ -654,6 +733,7 @@ addEventListener('keydown', e => {
   if (k === 'j') { doAttack(); }
   else if (k === ' ') { doJump(); e.preventDefault(); }
   else if (k === 'k') { doDash(); }
+  else if (k === 'l') { doSkill(); }
   else if (k === 'f' || k === 'enter') { interact(); e.preventDefault(); }
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
@@ -663,11 +743,12 @@ addEventListener('wheel', e => { camDist = THREE.MathUtils.clamp(camDist + Math.
 const btnA = document.getElementById('btnA');
 const btnJump = document.getElementById('btnJump');
 const btnDash = document.getElementById('btnDash');
+const btnSkill = document.getElementById('btnSkill');
 function bindBtn(btn, fn) {
   btn.addEventListener('click', e => { e.preventDefault(); fn(); });
   btn.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); fn(); }, { passive: false });
 }
-bindBtn(btnA, actionA); bindBtn(btnJump, doJump); bindBtn(btnDash, doDash);
+bindBtn(btnA, actionA); bindBtn(btnJump, doJump); bindBtn(btnDash, doDash); bindBtn(btnSkill, doSkill);
 
 // デスクトップ: クリックで 会話送り or 攻撃
 addEventListener('pointerdown', e => {
@@ -707,7 +788,7 @@ function endJoy() {
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill')); }
 
 // タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
 function assignRoles() {
@@ -809,11 +890,11 @@ syncUI();
 
 // 時刻 → ライト/空のグラデーション
 const dayKeys = [
-  { t: 0.0, sky: 0x0b1026, sun: 0x36406a, sunI: 0.2, fog: 0x0b1026, amb: 0.18, hemiI: 0.25 }, // 夜
+  { t: 0.0, sky: 0x0b1026, sun: 0x36406a, sunI: 0.35, fog: 0x141a30, amb: 0.32, hemiI: 0.44 }, // 夜
   { t: 0.22, sky: 0x2a2a4a, sun: 0xff9a5a, sunI: 1.3, fog: 0x33304a, amb: 0.25, hemiI: 0.4 },  // 夜明け
   { t: 0.5, sky: 0x7fa8e8, sun: 0xffe8c2, sunI: 2.2, fog: 0x9bb6e0, amb: 0.32, hemiI: 0.6 },   // 昼
   { t: 0.78, sky: 0xe8804a, sun: 0xff7038, sunI: 1.6, fog: 0xc06848, amb: 0.28, hemiI: 0.45 }, // 夕暮れ
-  { t: 1.0, sky: 0x0b1026, sun: 0x36406a, sunI: 0.2, fog: 0x0b1026, amb: 0.18, hemiI: 0.25 },  // 夜
+  { t: 1.0, sky: 0x0b1026, sun: 0x36406a, sunI: 0.35, fog: 0x141a30, amb: 0.32, hemiI: 0.44 },  // 夜
 ];
 const cA = new THREE.Color(), cB = new THREE.Color();
 function applyTimeOfDay(t) {
@@ -929,26 +1010,33 @@ function orientStanding(obj, up, fwd) {
 
 // 敵AI + 攻撃判定（フィールド）
 function combatUpdate(dt, t) {
-  // プレイヤー攻撃のヒット判定（振りの中盤で1回）
+  // プレイヤー通常攻撃のヒット判定（振りの中盤で1回）
   if (attackT > 0 && !attackHit && attackT < ATTACK_DUR * 0.66) {
     attackHit = true;
-    const co = Math.cos(ATTACK_RANGE / PLANET_R);
+    const range = comboHeavy ? ATTACK_RANGE + 0.8 : ATTACK_RANGE;
+    const cone = comboHeavy ? -0.1 : 0.2;       // 3段目は広範囲
+    const co = Math.cos(range / PLANET_R);
+    if (comboHeavy) shakeT = Math.max(shakeT, 0.15);
     for (const e of enemies) {
       if (!e.alive) continue;
       const d = pDir.dot(e.dir); if (d < co) continue;
-      _md.copy(e.dir).addScaledVector(pDir, -d);            // player→enemy tangent
-      if (_md.lengthSq() < 1e-6 || _md.normalize().dot(heading) < 0.2) continue;
-      const dmg = 8 + hero.level * 2 + Math.floor(Math.random() * 5);
+      _md.copy(e.dir).addScaledVector(pDir, -d);
+      if (_md.lengthSq() < 1e-6 || _md.normalize().dot(heading) < cone) continue;
+      let dmg = 8 + hero.level * 2 + Math.floor(Math.random() * 5);
+      if (comboHeavy) dmg = Math.floor(dmg * 1.8);
       const crit = Math.random() < 0.2; const tot = crit ? dmg * 2 : dmg;
       e.hp -= tot; e.hitFlash = 0.18;
-      showDmg(e.model.root.position.clone().addScaledVector(e.dir, 1.8), tot, crit ? 'crit' : '');
+      showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3.2 : 1.8), tot, crit ? 'crit' : '');
+      spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 2.2 : 1.2), 0xfff2c0, crit ? 8 : 5);
       Audio.sfx('hit');
-      _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.07).normalize();
-      if (e.hp <= 0) { e.alive = false; e.dead = 0.5; gainExp(e.def.exp); Audio.sfx('chest'); }
+      if (!e.isBoss) { _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.07).normalize(); }
+      if (e.hp <= 0) killEnemy(e);
     }
   }
   // 敵の挙動
   for (const e of enemies) {
+    // 発光フラッシュ
+    if (e.hitFlash > 0) { e.hitFlash -= dt; const f = Math.max(0, e.hitFlash / 0.18); for (const m of e.mats) m.emissive.setScalar(f * 0.9); }
     if (!e.alive) {
       if (e.dead > 0) { e.dead -= dt; e.model.root.scale.setScalar(Math.max(0.001, e.def.scale * e.dead * 2)); if (e.dead <= 0) e.model.root.visible = false; }
       continue;
@@ -960,19 +1048,24 @@ function combatUpdate(dt, t) {
       if (angDist > e.def.atkRange) {
         _axis.crossVectors(e.dir, pDir).normalize();
         e.dir.applyAxisAngle(_axis, Math.min(e.def.speed * dt / PLANET_R, angDist / PLANET_R)).normalize();
-      } else if (e.atkCD <= 0) { e.atkCD = 1.3; hurtPlayer(e.def.atk, e.dir); }
-    } else {                                              // 徘徊
+      } else if (e.atkCD <= 0) {
+        if (e.isBoss) { e.atkCD = 2.2; e.slamT = 0.5; shakeT = Math.max(shakeT, 0.4); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 0.5), 0xff7e6a, 16); hurtPlayer(e.def.atk, e.dir); }
+        else { e.atkCD = 1.3; hurtPlayer(e.def.atk, e.dir); }
+      }
+    } else if (!e.isBoss) {                                // 徘徊（ボスは常に追尾）
       if (!e.wander || e.wanderCD <= 0) { e.wander = randDir(); e.wanderCD = 2 + Math.random() * 2; }
       e.wanderCD -= dt;
       _axis.crossVectors(e.dir, e.wander).normalize();
       e.dir.applyAxisAngle(_axis, e.def.speed * 0.4 * dt / PLANET_R).normalize();
     }
-    const bob = (e.def.hover ? 0.3 : 0.12) * Math.sin(e.bobT * 2.2);
+    let bob = (e.def.hover ? 0.3 : 0.12) * Math.sin(e.bobT * 2.2);
+    if (e.isBoss && e.slamT > 0) { e.slamT -= dt; bob += Math.sin((1 - e.slamT / 0.5) * Math.PI) * 1.2; } // 叩きつけ
     e.model.root.position.copy(surfPos(e.dir, e.def.hover + bob));
     _md.copy(pDir).addScaledVector(e.dir, -d);
     orientStanding(e.model.root, e.dir, _md.lengthSq() > 1e-6 ? _md : heading);
   }
-  if (enemies.filter(e => e.alive).length < 3) spawnWave();
+  if (bossRef) { bossHpEl.style.width = Math.max(0, bossRef.hp / bossRef.maxHp * 100) + '%'; }
+  if (enemies.filter(e => e.alive && !e.isBoss).length < 3 && !bossRef) spawnWave();
 }
 
 function update(dt, t) {
@@ -980,6 +1073,10 @@ function update(dt, t) {
   if (dashT > 0) dashT -= dt; if (dashCD > 0) dashCD -= dt;
   if (attackT > 0) attackT -= dt; if (attackCD > 0) attackCD -= dt;
   if (invulnT > 0) invulnT -= dt; if (hurtFlash > 0) hurtFlash -= dt;
+  if (skillT > 0) skillT -= dt; if (skillCD > 0) skillCD -= dt; if (shakeT > 0) shakeT -= dt;
+  if (comboTimer > 0) comboTimer -= dt; else comboHeavy = false;
+  updateEffects(dt);
+  hurtEl.style.opacity = Math.max(0, hurtFlash / 0.4 * 0.9);
 
   let ix = 0, iy = 0, dash = false, playerMoving = false;
   if (gameState === 'field') {
@@ -1027,9 +1124,15 @@ function update(dt, t) {
   planetBasis();
   player.position.copy(pDir).multiplyScalar(PLANET_R + PLAYER_LIFT + jumpH + Math.sin(t * 2.2) * 0.04);
   orientStanding(player, _up, heading);
+  if (skillT > 0) player.rotateOnAxis(UPVEC, (1 - skillT / SKILL_DUR) * Math.PI * 5); // スキル中はスピン
   const attackP = attackT > 0 ? (1 - attackT / ATTACK_DUR) : 0;
   playerModel.update(dt, playerMoving && jumpH < 0.1, dash ? 1.4 : 1.0, attackP);
   player.visible = !(invulnT > 0 && Math.floor(t * 20) % 2 === 0); // 無敵中は点滅
+
+  // 追従ライト（夜でも見える）
+  const dayAmt = 1 - Math.abs(timeOfDay - 0.5) * 2;
+  playerLight.intensity = THREE.MathUtils.lerp(1.8, 0.12, THREE.MathUtils.clamp(dayAmt, 0, 1));
+  playerLight.position.copy(player.position).addScaledVector(_up, 1.8);
 
   // --- カメラ（惑星の上を周回する三人称）---
   _foot.copy(pDir).multiplyScalar(PLANET_R + 1.4);
@@ -1037,6 +1140,7 @@ function update(dt, t) {
   camera.position.copy(_foot).addScaledVector(_off, camDist * aspectFit);
   camera.up.copy(_up);
   camera.lookAt(_foot);
+  if (shakeT > 0) { const s = shakeT * 1.4; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; camera.position.z += (Math.random() - 0.5) * s; }
 
   // --- NPC（待機モーション）---
   for (const n of npcs) { n.model.root.position.copy(surfPos(n.dir, Math.sin(t * 1.8 + n.wanderT) * 0.04)); n.model.update(dt, false); }

@@ -108,6 +108,18 @@
     body.touch .actBtn { display: block; }
     #btnJump { right: 110px; bottom: 92px; }
     #btnDash { right: 30px; bottom: 196px; background: radial-gradient(circle at 38% 34%, rgba(120,200,170,.95), rgba(50,120,95,.92)); }
+    #btnSkill { right: 118px; bottom: 178px; background: radial-gradient(circle at 38% 34%, rgba(206,150,235,.95), rgba(120,70,165,.92)); }
+
+    /* 被弾の赤フラッシュ */
+    #hurt { position: fixed; inset: 0; z-index: 12; pointer-events: none; opacity: 0; transition: opacity .1s;
+      background: radial-gradient(ellipse at center, rgba(180,0,0,0) 45%, rgba(190,10,10,.55) 100%); }
+
+    /* ボスHPバー */
+    #bossbar { position: fixed; left: 50%; top: 52px; transform: translateX(-50%); z-index: 11; width: min(520px, 86vw); display: none;
+      font-family: ui-monospace, monospace; color: #ffd9d9; text-shadow: 0 2px 6px #000; pointer-events: none; }
+    #bossbar .nm { text-align: center; font-weight: 700; font-size: 13px; letter-spacing: .12em; margin-bottom: 4px; color: #ff9a8a; }
+    #bossbar .bbar { height: 13px; border-radius: 7px; background: rgba(0,0,0,.5); border: 1px solid rgba(255,120,120,.5); overflow: hidden; }
+    #bossbar .bbar > i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg,#d13a4a,#ff7e6a); transition: width .2s; }
 
     /* プレイヤーHUD */
     #hud {
@@ -229,6 +241,7 @@
   <button id="btnA" class="gfont">攻撃</button>
   <button id="btnJump" class="actBtn gfont">JUMP</button>
   <button id="btnDash" class="actBtn gfont">DASH</button>
+  <button id="btnSkill" class="actBtn gfont">SKILL</button>
   <div id="hint" class="gfont"></div>
 
   <div id="hud" class="gfont">
@@ -270,6 +283,11 @@
   </div>
 
   <div id="flash"></div>
+  <div id="hurt"></div>
+  <div id="bossbar" class="gfont">
+    <div class="nm" id="bossName"></div>
+    <div class="bbar"><i id="bossHp"></i></div>
+  </div>
 
   <div id="loading">LOADING…</div>
 

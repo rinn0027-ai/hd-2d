@@ -177,3 +177,24 @@ export function makeEnemy(type = 'slime') {
   shadowAll(g);
   return { root: g, height, type };
 }
+
+// ============================================================ ボス（巨大スライム王）
+export function makeBoss() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 16), mat(0x6a3aa2, 0.5));
+  body.scale.set(1.25, 0.9, 1.25); body.position.y = 0.95; g.add(body);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), mat(0x8a5ac2, 0.5));
+  belly.scale.set(1.2, 0.8, 1.0); belly.position.set(0, 0.7, 0.7); g.add(belly);
+  for (const ex of [-0.42, 0.42]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), mat(0xfff2c0, 0.4)); eye.position.set(ex, 1.15, 0.92); g.add(eye);
+    const pup = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), mat(0x301030, 0.3)); pup.position.set(ex, 1.1, 1.1); g.add(pup);
+    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.1), mat(0x2a1040, 0.5)); brow.position.set(ex, 1.38, 1.0); brow.rotation.z = ex < 0 ? -0.4 : 0.4; g.add(brow);
+  }
+  // 王冠
+  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.34, 5),
+    new THREE.MeshStandardMaterial({ color: 0xffd23a, metalness: 0.6, roughness: 0.3, emissive: 0x553300, emissiveIntensity: 0.5 }));
+  crown.position.y = 1.75; g.add(crown);
+  for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; const sp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 5), mat(0xff5a5a, 0.3)); sp.position.set(Math.cos(a) * 0.52, 1.95, Math.sin(a) * 0.52); g.add(sp); }
+  shadowAll(g);
+  return { root: g, height: 2.4 };
+}
