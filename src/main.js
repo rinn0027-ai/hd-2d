@@ -169,10 +169,10 @@ scene.add(planet);
 
 // ============================================================ 惑星テーマ（多惑星ワープ）
 const THEMES = [
-  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null,     emissive: 0x000000, emI: 0,    snow: false, pool: ['slime', 'bat', 'mushroom', 'splitter'], bossName: 'スライム王 KING SLIME' },
-  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xeaf4ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff, emissive: 0x223344, emI: 0.12, snow: true,  pool: ['bat', 'splitter', 'mushroom', 'caster'], bossName: 'フロストキング FROST KING' },
-  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff6a3a, fog: 0x3a1208, enemyTint: 0xff6a40, emissive: 0xff2200, emI: 0.55, snow: false, pool: ['mushroom', 'bat', 'caster', 'slime'], bossName: 'マグマロード MAGMA LORD' },
-  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff, emissive: 0x6a1aff, emI: 0.32, snow: false, pool: ['caster', 'splitter', 'bat', 'caster'], bossName: 'ヴォイドアイ VOID EYE' },
+  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null,     emissive: 0x000000, emI: 0,    snow: false, pool: ['slime', 'bat', 'mushroom', 'splitter'], bossKind: 'slime', bossName: 'スライム王 KING SLIME' },
+  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xeaf4ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff, emissive: 0x223344, emI: 0.12, snow: true,  pool: ['crystal', 'bat', 'splitter', 'crystal'], bossKind: 'frost', bossName: 'フロストキング FROST KING' },
+  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff6a3a, fog: 0x3a1208, enemyTint: 0xff6a40, emissive: 0xff2200, emI: 0.55, snow: false, pool: ['golem', 'mushroom', 'bat', 'golem'], bossKind: 'magma', bossName: 'マグマロード MAGMA LORD' },
+  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff, emissive: 0x6a1aff, emI: 0.32, snow: false, pool: ['eye', 'caster', 'splitter', 'eye'], bossKind: 'void', bossName: 'ヴォイドアイ VOID EYE' },
 ];
 let themeIndex = 0, planetMul = 1;
 const fogTheme = new THREE.Color(0x1a2238);
@@ -483,6 +483,7 @@ async function warpTo() {
   bossRef = null; bossbarEl.style.display = 'none';
   for (const p of pickups) scene.remove(p.obj); pickups.length = 0;
   for (const pr of projectiles) scene.remove(pr.mesh); projectiles.length = 0;
+  for (const ar of arrows) scene.remove(ar.mesh); arrows.length = 0;
   for (const a of aoes) scene.remove(a.grp); aoes.length = 0;
   pDir.set(0, 1, 0); hero.hp = Math.min(hero.maxHp, hero.hp + 30);
   jumpH = 22; jumpV = 0; grounded = false; pendingLand = true; // 空から降下
@@ -633,6 +634,9 @@ const ENEMY_DEF = {
   bat:      { model: 'bat',      hp: 12, atk: 8,  exp: 12, scale: 1.2, speed: 3.0, hover: 1.4, atkRange: 2.0, aggro: 13, behavior: 'charge', score: 12 },
   caster:   { model: 'mushroom', hp: 22, atk: 9,  exp: 18, scale: 1.4, speed: 1.0, hover: 0,   atkRange: 9.5, aggro: 16, behavior: 'caster', score: 20, tint: 0x8a4ad0 },
   splitter: { model: 'slime',    hp: 28, atk: 8,  exp: 14, scale: 1.7, speed: 1.6, hover: 0,   atkRange: 2.4, aggro: 10, behavior: 'split',  score: 16, tint: 0x3a86c0 },
+  crystal:  { model: 'crystal',  hp: 24, atk: 9,  exp: 18, scale: 1.4, speed: 1.0, hover: 0,   atkRange: 9.0, aggro: 15, behavior: 'caster', score: 20, noTint: true },
+  golem:    { model: 'golem',    hp: 58, atk: 15, exp: 26, scale: 1.4, speed: 1.1, hover: 0,   atkRange: 2.8, aggro: 9,  behavior: 'chase',  score: 28, noTint: true },
+  eye:      { model: 'eye',      hp: 18, atk: 9,  exp: 22, scale: 1.3, speed: 1.7, hover: 1.6, atkRange: 10,  aggro: 17, behavior: 'caster', score: 24, noTint: true },
 };
 const BOSS_DEF = { hp: 220, atk: 20, exp: 120, scale: 3.2, speed: 1.6, hover: 0, atkRange: 4.4, aggro: 999, behavior: 'boss', score: 300 };
 const enemies = [];
@@ -650,7 +654,7 @@ function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1) {
   const def = ENEMY_DEF[key];
   const e = M.makeEnemy(def.model);
   e.root.scale.setScalar(def.scale * childScale);
-  const tint = def.tint || THEMES[themeIndex].enemyTint;   // 種類色 or 惑星色
+  const tint = def.tint || (def.noTint ? null : THEMES[themeIndex].enemyTint);   // 種類色 or 惑星色（専属モデルは無着色）
   if (tint) e.root.traverse(o => { if (o.isMesh && o.material && o.material.color) o.material.color.set(tint); });
   const mats = collectMats(e.root);
   for (const m of mats) { m.emissive.copy(m.color).multiplyScalar(0.45); m.emissiveIntensity = 0.7; m.userData.be = m.emissive.clone(); } // 夜でも見える自発光
@@ -661,10 +665,9 @@ function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1) {
   enemies.push(en); return en;
 }
 function spawnBoss(n) {
-  const e = M.makeBoss();
+  const e = M.makeBoss(THEMES[themeIndex].bossKind);
   const hp = (BOSS_DEF.hp + (n - 5) * 60) * planetMul;
-  e.root.scale.setScalar(BOSS_DEF.scale);
-  if (THEMES[themeIndex].enemyTint) e.root.traverse(o => { if (o.isMesh && o.material && o.material.color && o.material.emissiveIntensity !== 1.4) o.material.color.lerp(new THREE.Color(THEMES[themeIndex].enemyTint), 0.5); });
+  e.root.scale.setScalar(BOSS_DEF.scale * 0.9);
   const mats = collectMats(e.root);
   for (const m of mats) { m.userData.be = m.emissive.clone(); }
   addOutline(e.root, 1.05);
@@ -767,6 +770,38 @@ function updateProjectiles(dt) {
   }
 }
 
+// プレイヤーの矢（弓）
+const arrows = [];
+function spawnArrow() {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.1, 6), new THREE.MeshStandardMaterial({ color: 0xffe6a0, emissive: 0x8a6a22, emissiveIntensity: 0.9, roughness: 0.5 }));
+  scene.add(m);
+  const axis = new THREE.Vector3().crossVectors(pDir, heading);
+  if (axis.lengthSq() < 1e-6) axis.crossVectors(pDir, XAXIS);
+  axis.normalize();
+  arrows.push({ mesh: m, dir: pDir.clone(), axis, life: 2.2, speed: 17, dmg: 12 + hero.level * 2 + atkBonus + bowPower * 6 });
+}
+function updateArrowsP(dt) {
+  for (let i = arrows.length - 1; i >= 0; i--) {
+    const p = arrows[i]; p.life -= dt;
+    p.dir.applyAxisAngle(p.axis, p.speed * dt / PLANET_R).normalize();
+    p.mesh.position.copy(surfPos(p.dir, 1.4));
+    let hit = false;
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const ang = Math.acos(THREE.MathUtils.clamp(p.dir.dot(e.dir), -1, 1)) * PLANET_R;
+      if (ang < e.def.scale * 0.9 + 0.7) {
+        const crit = Math.random() < 0.2, tot = crit ? p.dmg * 2 : p.dmg;
+        e.hp -= tot; e.hitFlash = 0.18;
+        showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), tot, crit ? 'crit' : '');
+        spawnImpact(p.mesh.position.clone(), 0xffe6a0, 5); Audio.sfx('hit');
+        if (e.hp <= 0) killEnemy(e);
+        hit = true; break;
+      }
+    }
+    if (hit || p.life <= 0) { scene.remove(p.mesh); arrows.splice(i, 1); }
+  }
+}
+
 // ============================================================ 敵HPバー（頭上, DOMプール）
 const ebarWrap = document.getElementById('ebars'), ebarPool = [], _ev = new THREE.Vector3();
 function updateEnemyBars() {
@@ -830,7 +865,7 @@ const hudWave = document.getElementById('hudWave'), hudScore = document.getEleme
 function updateHUD() {
   hudHp.style.width = Math.max(0, hero.hp / hero.maxHp * 100) + '%';
   hudHpTxt.textContent = `HP ${Math.max(0, Math.ceil(hero.hp))}/${hero.maxHp}`;
-  hudLv.textContent = 'Lv ' + hero.level;
+  hudLv.textContent = 'Lv ' + hero.level + (skillPoints > 0 ? ' ・SP' + skillPoints : '') + ' ・' + (weapon === 'bow' ? '🏹弓' : '⚔剣');
   hudExp.textContent = `EXP ${hero.exp}/${expToNext(hero.level)}`;
   hudWave.textContent = 'WAVE ' + wave;
   hudScore.textContent = 'SCORE ' + score + ' (BEST W' + best.wave + ')';
@@ -839,12 +874,11 @@ function updateHUD() {
 function gainExp(n) {
   hero.exp += n;
   while (hero.exp >= expToNext(hero.level)) {
-    hero.exp -= expToNext(hero.level); hero.level++; pendingLevels++;
+    hero.exp -= expToNext(hero.level); hero.level++; skillPoints++;
     hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.3);
-    Audio.sfx('victory');
+    Audio.sfx('victory'); showArea('Lv ' + hero.level + '！ スキルP +1', 'LEVEL UP (T / 🌳)');
   }
   updateHUD();
-  if (pendingLevels > 0 && gameState !== 'levelup') openLevelUp();
 }
 
 // アクション状態 / 強化
@@ -852,7 +886,8 @@ let dashT = 0, dashCD = 0, jumpH = 0, jumpV = 0, grounded = true;
 let attackT = 0, attackCD = 0, attackHit = false, invulnT = 0, hurtFlash = 0, shakeT = 0;
 let comboCount = 0, comboTimer = 0, comboHeavy = false, pendingLand = false;
 let skillT = 0, skillCD = 0;
-let atkBonus = 0, moveMul = 1, atkCdMul = 1, dashCdMul = 1, skillCdMul = 1; // 祝福による強化
+let atkBonus = 0, moveMul = 1, atkCdMul = 1, dashCdMul = 1, skillCdMul = 1;
+let skillPoints = 0, weapon = 'sword', bowUnlocked = false, bowPower = 0;
 let pendingLevels = 0;
 const ATTACK_DUR = 0.32, ATTACK_RANGE = 3.6, JUMP_V = 7.5, GRAVITY = 20, DASH_T = 0.22, DASH_SPEED = 22, DASH_CD = 0.55;
 const SKILL_DUR = 0.5, SKILL_CD = 3.5, SKILL_RANGE = 6.0;
@@ -860,10 +895,19 @@ const hurtEl = document.getElementById('hurt');
 
 function doAttack() {
   if (gameState !== 'field' || attackCD > 0 || skillT > 0) return;
+  if (weapon === 'bow' && bowUnlocked) {        // 弓: 遠距離の矢
+    attackT = 0.2; attackCD = 0.34 * atkCdMul; comboHeavy = false;
+    spawnArrow(); Audio.sfx('attack'); return;
+  }
   comboCount = (comboTimer > 0) ? (comboCount % 3) + 1 : 1;  // 1→2→3 の連舞
   comboTimer = 0.7; comboHeavy = comboCount >= 3;
   attackT = ATTACK_DUR; attackCD = (comboHeavy ? 0.5 : 0.32) * atkCdMul; attackHit = false;
   Audio.sfx(comboHeavy ? 'skill' : 'attack');
+}
+function switchWeapon() {
+  if (!bowUnlocked) { showArea('弓は スキルツリーで習得', 'LOCKED'); return; }
+  weapon = weapon === 'sword' ? 'bow' : 'sword'; Audio.sfx('cursor');
+  showArea(weapon === 'bow' ? '弓に持ち替えた' : '剣に持ち替えた', weapon.toUpperCase());
 }
 function doSkill() {
   if (gameState !== 'field' || skillCD > 0) return;
@@ -895,7 +939,7 @@ function hurtPlayer(dmg, fromDir) {
   showDmg(player.position.clone().addScaledVector(pDir, 2.6), Math.round(dmg));
   if (fromDir) { _axis.crossVectors(pDir, fromDir).normalize(); pDir.applyAxisAngle(_axis, -0.05).normalize(); }
   updateHUD();
-  if (hero.hp <= 0) respawnPlayer();
+  if (hero.hp <= 0) gameOver(false);
 }
 function respawnPlayer() {
   saveBest();
@@ -914,8 +958,10 @@ function killEnemy(e) {
   if (Math.random() < 0.5) dropPickup('gem', e.dir);
   if (e.isBoss) {
     bossRef = null; bossbarEl.style.display = 'none'; slowMo = 1.0;
-    for (let i = 0; i < 5; i++) dropPickup('coin', randDir().lerp(e.dir, 0.5).normalize());
-    hero.hp = hero.maxHp; Audio.sfx('victory'); showArea('スライム王を たおした！', 'BOSS DEFEATED');
+    for (let i = 0; i < 8; i++) dropPickup('coin', randDir().lerp(e.dir, 0.5).normalize());
+    hero.hp = hero.maxHp; Audio.sfx('victory');
+    showArea(THEMES[e.theme].bossName + ' 撃破！', 'BOSS DEFEATED');
+    if (e.theme === 3) { setTimeout(() => gameOver(true), 1600); }   // 異界ボス＝通关
   } else {
     Audio.sfx('chest');
     // 分裂
@@ -994,6 +1040,77 @@ function buyItem(i) {
 function closeShop() { shopEl.style.display = 'none'; gameState = 'field'; }
 shopCloseEl.addEventListener('click', closeShop);
 shopCloseEl.addEventListener('touchstart', e => { e.preventDefault(); closeShop(); }, { passive: false });
+
+// ============================================================ スキルツリー
+const TREE_NODES = [
+  { ic: '⚔️', nm: '剛力', ds: '攻撃力 +5', max: 6, lv: 0, ap: () => { atkBonus += 5; } },
+  { ic: '🛡️', nm: '鉄壁', ds: '最大HP +25', max: 6, lv: 0, ap: () => { hero.maxHp += 25; hero.hp = hero.maxHp; } },
+  { ic: '🏹', nm: '弓術', ds: '弓を習得 / 威力UP', max: 4, lv: 0, ap: () => { bowUnlocked = true; bowPower++; } },
+  { ic: '🏃', nm: '俊足', ds: '移動速度 +8%', max: 4, lv: 0, ap: () => { moveMul *= 1.08; } },
+  { ic: '🌀', nm: '連撃', ds: '攻撃速度 +12%', max: 4, lv: 0, ap: () => { atkCdMul *= 0.88; } },
+  { ic: '✨', nm: '術理', ds: 'スキルCD -15%', max: 4, lv: 0, ap: () => { skillCdMul *= 0.85; } },
+  { ic: '💨', nm: '回避', ds: 'ダッシュCD -15%', max: 4, lv: 0, ap: () => { dashCdMul *= 0.85; } },
+];
+const treeEl = document.getElementById('skilltree'), treeNodesEl = document.getElementById('treeNodes'), treeSPEl = document.getElementById('treeSP'), treeCloseEl = document.getElementById('treeClose');
+function openTree() { if (gameState !== 'field') return; gameState = 'skilltree'; resetTouch(); renderTree(); treeEl.style.display = 'flex'; }
+function renderTree() {
+  treeSPEl.textContent = 'SP: ' + skillPoints;
+  treeNodesEl.innerHTML = '';
+  TREE_NODES.forEach((nd, i) => {
+    const maxed = nd.lv >= nd.max, can = skillPoints > 0 && !maxed;
+    const c = document.createElement('div'); c.className = 'luCard' + (can ? '' : ' dis');
+    c.innerHTML = `<div class="ic">${nd.ic}</div><div class="nm">${i + 1}. ${nd.nm}</div><div class="ds">${nd.ds}</div><div class="pr">Lv ${nd.lv}/${nd.max}</div>`;
+    c.addEventListener('click', () => buyNode(i));
+    c.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); buyNode(i); }, { passive: false });
+    treeNodesEl.appendChild(c);
+  });
+}
+function buyNode(i) {
+  if (gameState !== 'skilltree') return;
+  const nd = TREE_NODES[i];
+  if (skillPoints <= 0 || nd.lv >= nd.max) { Audio.sfx('cancel'); return; }
+  skillPoints--; nd.lv++; nd.ap(); Audio.sfx('confirm'); updateHUD(); renderTree();
+}
+function closeTree() { treeEl.style.display = 'none'; gameState = 'field'; }
+treeCloseEl.addEventListener('click', closeTree);
+treeCloseEl.addEventListener('touchstart', e => { e.preventDefault(); closeTree(); }, { passive: false });
+
+// ============================================================ ゲームオーバー / 結果 / 排行榜
+const goEl = document.getElementById('gameover'), goResEl = document.getElementById('goRes'), goBoardEl = document.getElementById('goBoard'), goTitleEl = document.getElementById('goTitle'), goRestartEl = document.getElementById('goRestart');
+let board = [];
+try { const s = JSON.parse(localStorage.getItem('hd2d_board')); if (Array.isArray(s)) board = s; } catch (e) { }
+function pushBoard(sc, wv) {
+  board.push({ s: sc, w: wv, t: Date.now() });
+  board.sort((a, b) => b.s - a.s); board = board.slice(0, 5);
+  try { localStorage.setItem('hd2d_board', JSON.stringify(board)); } catch (e) { }
+}
+function gameOver(cleared) {
+  saveBest(); pushBoard(score, wave);
+  gameState = 'gameover'; resetTouch();
+  goTitleEl.textContent = cleared ? '★ STAGE CLEAR ★' : 'GAME OVER';
+  goTitleEl.style.color = cleared ? '#7ef0a0' : '#ff7e6a';
+  goResEl.innerHTML = `星: ${THEMES[themeIndex].en}<br>WAVE ${wave} ・ Lv ${hero.level}<br>SCORE <b style="color:#ffd27a">${score}</b> ・ ◆${coins}`;
+  goBoardEl.innerHTML = '— RANKING —<br>' + board.map((b, i) => `${i + 1}. <b>${b.s}</b> (W${b.w})`).join('<br>');
+  goEl.style.display = 'flex';
+}
+function restartRun() {
+  goEl.style.display = 'none';
+  // リセット
+  for (const e of enemies) scene.remove(e.model.root); enemies.length = 0; bossRef = null; bossbarEl.style.display = 'none';
+  for (const p of pickups) scene.remove(p.obj); pickups.length = 0;
+  for (const pr of projectiles) scene.remove(pr.mesh); projectiles.length = 0;
+  for (const ar of arrows) scene.remove(ar.mesh); arrows.length = 0;
+  for (const a of aoes) scene.remove(a.grp); aoes.length = 0;
+  hero.hp = 100; hero.maxHp = 100; hero.exp = 0; hero.level = 1;
+  atkBonus = 0; moveMul = 1; atkCdMul = 1; dashCdMul = 1; skillCdMul = 1; skillPoints = 0;
+  weapon = 'sword'; bowUnlocked = false; bowPower = 0; for (const nd of TREE_NODES) nd.lv = 0;
+  score = 0; coins = 0; planetMul = 1; themeIndex = 0; applyTheme(0);
+  pDir.set(0, 1, 0); jumpH = 0; jumpV = 0; grounded = true; invulnT = 1;
+  wave = 0; gameState = 'field'; startWave(1); updateHUD();
+  showArea('リスタート', 'RESTART');
+}
+goRestartEl.addEventListener('click', restartRun);
+goRestartEl.addEventListener('touchstart', e => { e.preventDefault(); restartRun(); }, { passive: false });
 
 // ============================================================ ボスの範囲攻撃（地面の赤円→爆発）
 const aoes = [];
@@ -1092,10 +1209,14 @@ addEventListener('keydown', e => {
   keys[k] = true;
   if (gameState === 'levelup') { if (k === '1' || k === '2' || k === '3') pickUpgrade(+k - 1); return; }
   if (gameState === 'shop') { if (k >= '1' && k <= '4') buyItem(+k - 1); else if (k === 'escape' || k === 'f' || k === 'enter') closeShop(); return; }
+  if (gameState === 'skilltree') { if (k >= '1' && k <= '7') buyNode(+k - 1); else if (k === 'escape' || k === 't' || k === 'f') closeTree(); return; }
+  if (gameState === 'gameover') { if (k === 'enter' || k === ' ' || k === 'r') restartRun(); return; }
   if (k === 'j') { doAttack(); }
   else if (k === ' ') { doJump(); e.preventDefault(); }
   else if (k === 'k') { doDash(); }
   else if (k === 'l') { doSkill(); }
+  else if (k === 'r') { switchWeapon(); }
+  else if (k === 't') { openTree(); }
   else if (k === 'f' || k === 'enter') { interact(); e.preventDefault(); }
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
@@ -1106,11 +1227,14 @@ const btnA = document.getElementById('btnA');
 const btnJump = document.getElementById('btnJump');
 const btnDash = document.getElementById('btnDash');
 const btnSkill = document.getElementById('btnSkill');
+const btnWep = document.getElementById('btnWep');
+const btnTree = document.getElementById('btnTree');
 function bindBtn(btn, fn) {
   btn.addEventListener('click', e => { e.preventDefault(); fn(); });
   btn.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); fn(); }, { passive: false });
 }
 bindBtn(btnA, actionA); bindBtn(btnJump, doJump); bindBtn(btnDash, doDash); bindBtn(btnSkill, doSkill);
+bindBtn(btnWep, switchWeapon); bindBtn(btnTree, openTree);
 
 // デスクトップ: クリックで 会話送り or 攻撃
 addEventListener('pointerdown', e => {
@@ -1150,7 +1274,7 @@ function endJoy() {
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #levelup, #shop')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #btnWep, #btnTree, #levelup, #shop, #skilltree, #gameover')); }
 
 // タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
 function assignRoles() {
@@ -1487,6 +1611,7 @@ function update(dt, t) {
     }
     combatUpdate(dt, t);
     updateProjectiles(dt);
+    updateArrowsP(dt);
     updateAoes(dt);
     updatePickups(dt);
     // ウェーブ進行：全滅したら少し待って次のウェーブ

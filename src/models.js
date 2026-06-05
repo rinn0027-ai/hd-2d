@@ -173,13 +173,40 @@ export function makeEnemy(type = 'slime') {
     for (const ex of [-0.16, 0.16]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), mat(0xffd23a, 0.4)); eye.position.set(ex, 1.05, 0.42); g.add(eye); }
     for (const ex of [-0.18, 0.18]) { const ear = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.28, 5), mat(0x46315e, 0.7)); ear.position.set(ex, 1.5, 0); g.add(ear); }
     height = 2.0;
+  } else if (type === 'crystal') {            // 氷の結晶（雪）
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.55, 0), new THREE.MeshStandardMaterial({ color: 0xbfe8ff, emissive: 0x2a6a9a, emissiveIntensity: 0.5, roughness: 0.2, metalness: 0.2 }));
+    core.position.y = 0.9; g.add(core);
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; const sp = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.6, 5), mat(0xdff4ff, 0.2)); sp.position.set(Math.cos(a) * 0.5, 0.9 + (i % 2 ? 0.3 : -0.2), Math.sin(a) * 0.5); sp.rotation.z = Math.cos(a) * 1.2; sp.rotation.x = Math.sin(a) * 1.2; g.add(sp); }
+    for (const ex of [-0.18, 0.18]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5), mat(0x123a55, 0.3)); eye.position.set(ex, 0.95, 0.5); g.add(eye); }
+    height = 1.6;
+  } else if (type === 'golem') {              // 岩ゴーレム（溶岩）
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 0.9), mat(0x6b5048, 0.95)); body.position.y = 1.0; g.add(body);
+    const headG = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 0.6), mat(0x5a443c, 0.95)); headG.position.y = 1.8; g.add(headG);
+    for (const sgn of [-1, 1]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.9, 0.32), mat(0x5a443c, 0.95)); arm.position.set(sgn * 0.78, 1.0, 0); g.add(arm); }
+    for (let i = 0; i < 4; i++) { const cr = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 5), new THREE.MeshStandardMaterial({ color: 0xff5a20, emissive: 0xff3a00, emissiveIntensity: 1.3, roughness: 0.5 })); cr.position.set((Math.random() - 0.5) * 0.9, 0.7 + Math.random() * 0.8, 0.48); g.add(cr); }
+    for (const ex of [-0.16, 0.16]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), new THREE.MeshStandardMaterial({ color: 0xffd23a, emissive: 0xff8a00, emissiveIntensity: 1.4 })); eye.position.set(ex, 1.85, 0.32); g.add(eye); }
+    height = 2.4;
+  } else if (type === 'eye') {                // 浮遊する眼（異界）
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), mat(0xe8e0ff, 0.3)); ball.position.y = 1.2; g.add(ball);
+    const iris = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), new THREE.MeshStandardMaterial({ color: 0x9a3aff, emissive: 0x6a1aff, emissiveIntensity: 0.9, roughness: 0.3 })); iris.position.set(0, 1.2, 0.46); g.add(iris);
+    const pup = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), mat(0x100018, 0.2)); pup.position.set(0, 1.2, 0.62); g.add(pup);
+    for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; const t = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.5, 5), mat(0x6a2aaa, 0.5)); t.position.set(Math.cos(a) * 0.4, 0.7, Math.sin(a) * 0.4); t.rotation.x = Math.PI; g.add(t); }
+    height = 1.8;
   }
   shadowAll(g);
   return { root: g, height, type };
 }
 
-// ============================================================ ボス（巨大スライム王）
-export function makeBoss() {
+// ============================================================ ボス（惑星別の専属外形）
+export function makeBoss(kind = 'slime') {
+  if (kind === 'frost') return makeFrostBoss();
+  if (kind === 'magma') return makeMagmaBoss();
+  if (kind === 'void') return makeVoidBoss();
+  return makeSlimeBoss();
+}
+
+// ============================================================ ボス（巨大スライム王・草原）
+function makeSlimeBoss() {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 16), mat(0x6a3aa2, 0.5));
   body.scale.set(1.25, 0.9, 1.25); body.position.y = 0.95; g.add(body);
@@ -190,11 +217,49 @@ export function makeBoss() {
     const pup = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), mat(0x301030, 0.3)); pup.position.set(ex, 1.1, 1.1); g.add(pup);
     const brow = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.1), mat(0x2a1040, 0.5)); brow.position.set(ex, 1.38, 1.0); brow.rotation.z = ex < 0 ? -0.4 : 0.4; g.add(brow);
   }
-  // 王冠
   const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.34, 5),
     new THREE.MeshStandardMaterial({ color: 0xffd23a, metalness: 0.6, roughness: 0.3, emissive: 0x553300, emissiveIntensity: 0.5 }));
   crown.position.y = 1.75; g.add(crown);
   for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; const sp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 5), mat(0xff5a5a, 0.3)); sp.position.set(Math.cos(a) * 0.52, 1.95, Math.sin(a) * 0.52); g.add(sp); }
   shadowAll(g);
   return { root: g, height: 2.4 };
+}
+
+// フロストキング（雪）— 巨大な氷塊＋スパイク
+function makeFrostBoss() {
+  const g = new THREE.Group();
+  const iceMat = new THREE.MeshStandardMaterial({ color: 0xcdeeff, emissive: 0x2a6a9a, emissiveIntensity: 0.55, roughness: 0.15, metalness: 0.25 });
+  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 0), iceMat); core.position.y = 1.2; g.add(core);
+  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; const sp = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.1, 5), iceMat); sp.position.set(Math.cos(a) * 1.0, 1.2 + (i % 3 - 1) * 0.6, Math.sin(a) * 1.0); sp.rotation.z = Math.cos(a) * 1.3; sp.rotation.x = -Math.sin(a) * 1.3; g.add(sp); }
+  for (const ex of [-0.34, 0.34]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshStandardMaterial({ color: 0x6fd0ff, emissive: 0x2aa0ff, emissiveIntensity: 1.2 })); eye.position.set(ex, 1.35, 1.0); g.add(eye); }
+  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.3, 6), new THREE.MeshStandardMaterial({ color: 0xbfe8ff, emissive: 0x3a8acc, emissiveIntensity: 0.7, metalness: 0.4, roughness: 0.2 }));
+  crown.position.y = 2.3; g.add(crown);
+  shadowAll(g);
+  return { root: g, height: 2.6 };
+}
+
+// マグマロード（溶岩）— 岩塊ゴーレム＋発光する亀裂
+function makeMagmaBoss() {
+  const g = new THREE.Group();
+  const rock = mat(0x4a3630, 0.95);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.9, 1.5), rock); body.position.y = 1.3; g.add(body);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.9, 0.9), mat(0x3e2c26, 0.95)); head.position.y = 2.6; g.add(head);
+  for (const sgn of [-1, 1]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.5, 0.5), rock); arm.position.set(sgn * 1.3, 1.3, 0); g.add(arm); }
+  const lava = new THREE.MeshStandardMaterial({ color: 0xff5a20, emissive: 0xff3000, emissiveIntensity: 1.5, roughness: 0.5 });
+  for (let i = 0; i < 10; i++) { const cr = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 5), lava); cr.position.set((Math.random() - 0.5) * 1.7, 0.6 + Math.random() * 1.6, 0.78); g.add(cr); }
+  for (const ex of [-0.26, 0.26]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffd23a, emissive: 0xff8a00, emissiveIntensity: 1.6 })); eye.position.set(ex, 2.65, 0.48); g.add(eye); }
+  shadowAll(g);
+  return { root: g, height: 3.0 };
+}
+
+// ヴォイドアイ（異界）— 巨大な浮遊する眼
+function makeVoidBoss() {
+  const g = new THREE.Group();
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(1.3, 24, 18), mat(0xe8e0ff, 0.25)); ball.position.y = 1.6; g.add(ball);
+  const iris = new THREE.Mesh(new THREE.SphereGeometry(0.62, 16, 12), new THREE.MeshStandardMaterial({ color: 0x9a3aff, emissive: 0x6a1aff, emissiveIntensity: 1.0, roughness: 0.3 })); iris.position.set(0, 1.6, 1.0); g.add(iris);
+  const pup = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), mat(0x0a0014, 0.2)); pup.position.set(0, 1.6, 1.32); g.add(pup);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.1, 8, 28), new THREE.MeshStandardMaterial({ color: 0xb98aff, emissive: 0x7a2aff, emissiveIntensity: 0.9, roughness: 0.4 })); ring.position.y = 1.6; ring.rotation.x = Math.PI / 2.3; g.add(ring);
+  for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2; const t = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.9, 5), mat(0x5a2a9a, 0.5)); t.position.set(Math.cos(a) * 0.9, 0.6, Math.sin(a) * 0.9); t.rotation.x = Math.PI; g.add(t); }
+  shadowAll(g);
+  return { root: g, height: 2.8 };
 }
