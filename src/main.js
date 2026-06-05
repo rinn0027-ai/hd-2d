@@ -337,11 +337,20 @@ let weather = 'none'; // 'none' | 'petals' | 'rain'
 // ============================================================ プレイヤー（3Dローポリ人型）
 const playerModel = M.makeHumanoid({ skin: 0xe8b88c, cloth: 0x3b86a8, pants: 0x2f4f6a, hat: 0xcaa45a });
 const player = playerModel.root;
+player.scale.setScalar(1.12);            // 少し大きく
+// 主役を自発光させて、どんな光でも視認できるように
+player.traverse(o => { if (o.isMesh && o.material && o.material.emissive) { o.material.emissive.copy(o.material.color).multiplyScalar(0.6); o.material.emissiveIntensity = 0.28; } });
 scene.add(player);
+// 足元の光リング（位置をいつも把握できる目印）
+const markerMat = new THREE.MeshBasicMaterial({ color: 0x7fe0ff, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false });
+const marker = new THREE.Mesh(new THREE.RingGeometry(1.0, 1.32, 28), markerMat);
+marker.renderOrder = 3;
+scene.add(marker);
 // プレイヤーは惑星上の方向ベクトルで管理（北極からスタート）
 const pDir = new THREE.Vector3(0, 1, 0);
 const PLAYER_LIFT = 0.0;                 // 足元が地表に接地
 const heading = new THREE.Vector3(0, 0, 1); // 向いている接線方向
+const _MZ = new THREE.Vector3(0, 0, 1);
 
 // ============================================================ 建物（小屋）— 惑星表面に立てる
 function buildHouse(dir) {
@@ -1334,9 +1343,16 @@ function update(dt, t) {
   playerModel.update(dt, playerMoving && jumpH < 0.1, dash ? 1.4 : 1.0, attackP);
   player.visible = !(invulnT > 0 && Math.floor(t * 20) % 2 === 0); // 無敵中は点滅
 
-  // 追従ライト（夜でも見える）
+  // 足元マーカー（位置の目印・脈動）
+  marker.position.copy(pDir).multiplyScalar(PLANET_R + 0.12);
+  marker.quaternion.setFromUnitVectors(_MZ, pDir);
+  marker.scale.setScalar(1 + Math.sin(t * 4) * 0.06);
+  markerMat.opacity = 0.55 + Math.sin(t * 4) * 0.18;
+  marker.visible = player.visible;
+
+  // 追従ライト（常時すこし + 夜は強め）
   const dayAmt = 1 - Math.abs(timeOfDay - 0.5) * 2;
-  playerLight.intensity = THREE.MathUtils.lerp(1.8, 0.12, THREE.MathUtils.clamp(dayAmt, 0, 1));
+  playerLight.intensity = THREE.MathUtils.lerp(1.9, 0.6, THREE.MathUtils.clamp(dayAmt, 0, 1));
   playerLight.position.copy(player.position).addScaledVector(_up, 1.8);
 
   // --- カメラ（惑星の上を周回する三人称）---
