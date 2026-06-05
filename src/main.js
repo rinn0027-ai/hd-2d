@@ -169,12 +169,12 @@ scene.add(planet);
 
 // ============================================================ 惑星テーマ（多惑星ワープ）
 const THEMES = [
-  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238 },
-  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xbfe0ff, fog: 0x2a3a52 },
-  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff7a4a, fog: 0x3a1810 },
-  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840 },
+  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null },
+  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xbfe0ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff },
+  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff7a4a, fog: 0x3a1810, enemyTint: 0xff6a40 },
+  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff },
 ];
-let themeIndex = 0;
+let themeIndex = 0, planetMul = 1;
 function applyTheme(i) { grassMat.color.set(THEMES[i].ground); fogTheme.set(THEMES[i].fog); }
 const fogTheme = new THREE.Color(0x1a2238);
 // 空に浮かぶ他の惑星（装飾）
@@ -420,7 +420,7 @@ function addNPC(dir, paletteName, name, lines) {
   placeOnSurface(model.root, dir);
   addOutline(model.root, 1.08);
   scene.add(model.root);
-  const npc = { model, name, lines, dir: dir.clone().normalize(), wanderT: Math.random() * 5 };
+  const npc = { model, name, lines, dir: dir.clone().normalize(), wanderT: Math.random() * 5, shop: paletteName === 'merchant' };
   npcs.push(npc); addObstacleDir(dir, 0.045);
   return npc;
 }
@@ -454,6 +454,7 @@ let warping = false;
 async function warpTo() {
   if (warping) return; warping = true;
   themeIndex = (themeIndex + 1) % THEMES.length;
+  planetMul *= 1.3;                        // 惑星ごとに難度上昇
   Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.3);
   await flash('#aef0ff', 0.95);
   applyTheme(themeIndex);
@@ -623,23 +624,26 @@ function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1) {
   const def = ENEMY_DEF[key];
   const e = M.makeEnemy(def.model);
   e.root.scale.setScalar(def.scale * childScale);
-  if (def.tint) e.root.traverse(o => { if (o.isMesh && o.material && o.material.color) o.material.color.set(def.tint); });
+  const tint = def.tint || THEMES[themeIndex].enemyTint;   // 種類色 or 惑星色
+  if (tint) e.root.traverse(o => { if (o.isMesh && o.material && o.material.color) o.material.color.set(tint); });
   const mats = collectMats(e.root);
   for (const m of mats) { m.emissive.copy(m.color).multiplyScalar(0.45); m.emissiveIntensity = 0.7; m.userData.be = m.emissive.clone(); } // 夜でも見える自発光
   addOutline(e.root, 1.07);
   scene.add(e.root);
-  const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp: def.hp * hpScale, maxHp: def.hp * hpScale, alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats, childScale };
+  const hp = def.hp * hpScale * planetMul;
+  const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp, maxHp: hp, atk: def.atk * planetMul, alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats, childScale };
   enemies.push(en); return en;
 }
 function spawnBoss(n) {
   const e = M.makeBoss();
-  const hp = BOSS_DEF.hp + (n - 5) * 60;
+  const hp = (BOSS_DEF.hp + (n - 5) * 60) * planetMul;
   e.root.scale.setScalar(BOSS_DEF.scale);
+  if (THEMES[themeIndex].enemyTint) e.root.traverse(o => { if (o.isMesh && o.material && o.material.color && o.material.emissiveIntensity !== 1.4) o.material.color.lerp(new THREE.Color(THEMES[themeIndex].enemyTint), 0.5); });
   const mats = collectMats(e.root);
   for (const m of mats) { m.userData.be = m.emissive.clone(); }
   addOutline(e.root, 1.05);
   scene.add(e.root);
-  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, dir: freeDir().clone(), hp, maxHp: hp, alive: true, atkCD: 2, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats };
+  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, dir: freeDir().clone(), hp, maxHp: hp, atk: BOSS_DEF.atk * planetMul, alive: true, atkCD: 2, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats };
   enemies.push(bossRef);
   Audio.sfx('encounter');
   document.getElementById('bossName').textContent = '◆ スライム王 KING SLIME ◆';
@@ -854,8 +858,8 @@ function respawnPlayer() {
 }
 function killEnemy(e) {
   if (!e.alive) return;
-  e.alive = false; e.dead = 0.5; gainExp(e.def.exp);
-  score += e.def.score || 10;
+  e.alive = false; e.dead = 0.5; gainExp(Math.round(e.def.exp * planetMul));
+  score += Math.round((e.def.score || 10) * planetMul);
   spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.0), 0xffd27a, 10);
   // 掉落
   dropPickup('coin', e.dir);
@@ -912,6 +916,38 @@ function pickUpgrade(i) {
   else { levelupEl.style.display = 'none'; luChoices = []; gameState = 'field'; showArea('Lv ' + hero.level + ' になった！', 'LEVEL UP'); }
 }
 
+// ============================================================ 商店（行商人）
+const SHOP_ITEMS = [
+  { ic: '🍶', nm: '全回復', ds: 'HPを全回復', cost: 6, ap: () => { hero.hp = hero.maxHp; } },
+  { ic: '⚔️', nm: '攻撃の薬', ds: '攻撃力 +5', cost: 14, ap: () => { atkBonus += 5; } },
+  { ic: '❤️', nm: '命の薬', ds: '最大HP +30・全回復', cost: 14, ap: () => { hero.maxHp += 30; hero.hp = hero.maxHp; } },
+  { ic: '👟', nm: '俊足の靴', ds: '移動速度 +10%', cost: 20, ap: () => { moveMul *= 1.1; } },
+];
+const shopEl = document.getElementById('shop'), shopItemsEl = document.getElementById('shopItems'), shopCoinsEl = document.getElementById('shopCoins'), shopCloseEl = document.getElementById('shopClose');
+function openShop() {
+  gameState = 'shop'; resetTouch(); renderShop(); shopEl.style.display = 'flex';
+}
+function renderShop() {
+  shopCoinsEl.textContent = '◆ ' + coins;
+  shopItemsEl.innerHTML = '';
+  SHOP_ITEMS.forEach((it, i) => {
+    const c = document.createElement('div'); c.className = 'luCard' + (coins < it.cost ? ' dis' : '');
+    c.innerHTML = `<div class="ic">${it.ic}</div><div class="nm">${i + 1}. ${it.nm}</div><div class="ds">${it.ds}</div><div class="pr">◆ ${it.cost}</div>`;
+    c.addEventListener('click', () => buyItem(i));
+    c.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); buyItem(i); }, { passive: false });
+    shopItemsEl.appendChild(c);
+  });
+}
+function buyItem(i) {
+  if (gameState !== 'shop') return;
+  const it = SHOP_ITEMS[i];
+  if (coins < it.cost) { Audio.sfx('cancel'); return; }
+  coins -= it.cost; it.ap(); Audio.sfx('confirm'); updateHUD(); renderShop();
+}
+function closeShop() { shopEl.style.display = 'none'; gameState = 'field'; }
+shopCloseEl.addEventListener('click', closeShop);
+shopCloseEl.addEventListener('touchstart', e => { e.preventDefault(); closeShop(); }, { passive: false });
+
 // ============================================================ ボスの範囲攻撃（地面の赤円→爆発）
 const aoes = [];
 const aoeRingGeo = new THREE.RingGeometry(0.82, 1.0, 36);
@@ -960,7 +996,7 @@ function findInteract() {
   return best;
 }
 function interactTarget() {
-  if (nearTarget.type === 'npc') { Audio.sfx('confirm'); startDialogue(nearTarget.ref.name, nearTarget.ref.lines); }
+  if (nearTarget.type === 'npc') { Audio.sfx('confirm'); if (nearTarget.ref.shop) openShop(); else startDialogue(nearTarget.ref.name, nearTarget.ref.lines); }
   else if (nearTarget.type === 'warp') { warpTo(); }
   else if (nearTarget.type === 'chest') {
     const c = nearTarget.ref; c.opened = true; c.lidPivot.rotation.x = -1.2;
@@ -992,6 +1028,7 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   keys[k] = true;
   if (gameState === 'levelup') { if (k === '1' || k === '2' || k === '3') pickUpgrade(+k - 1); return; }
+  if (gameState === 'shop') { if (k >= '1' && k <= '4') buyItem(+k - 1); else if (k === 'escape' || k === 'f' || k === 'enter') closeShop(); return; }
   if (k === 'j') { doAttack(); }
   else if (k === ' ') { doJump(); e.preventDefault(); }
   else if (k === 'k') { doDash(); }
@@ -1050,7 +1087,7 @@ function endJoy() {
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #levelup')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #levelup, #shop')); }
 
 // タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
 function assignRoles() {
@@ -1230,7 +1267,7 @@ let facingFlip = false, lastBack = false, walkAnim = 0, stepTimer = 0;
 // アクションプロンプト（Aボタンは攻撃/交互作用の文脈表示）
 const hintEl = document.getElementById('hint');
 function updatePrompt() {
-  const verb = gameState === 'dialogue' ? '送る' : (nearTarget ? (nearTarget.type === 'chest' ? '調べる' : nearTarget.type === 'warp' ? 'ワープ' : '話す') : '攻撃');
+  const verb = gameState === 'dialogue' ? '送る' : (nearTarget ? (nearTarget.type === 'chest' ? '調べる' : nearTarget.type === 'warp' ? 'ワープ' : (nearTarget.ref && nearTarget.ref.shop) ? 'みせ' : '話す') : '攻撃');
   if (isTouch) {
     btnA.classList.add('show');
     btnA.textContent = gameState === 'dialogue' ? '▼' : verb;
@@ -1310,13 +1347,13 @@ function combatUpdate(dt, t) {
     const d = THREE.MathUtils.clamp(pDir.dot(e.dir), -1, 1);
     const angDist = Math.acos(d) * PLANET_R;
     const bh = e.def.behavior;
-    if (e.isBoss) { e.castCD = (e.castCD || 3) - dt; if (e.castCD <= 0 && angDist < 20) { e.castCD = 4.5; spawnAoe(pDir.clone(), 4.8, Math.round(e.def.atk * 1.1)); } }
+    if (e.isBoss) { e.castCD = (e.castCD || 3) - dt; if (e.castCD <= 0 && angDist < 20) { e.castCD = 4.5; spawnAoe(pDir.clone(), 4.8, Math.round(e.atk * 1.1)); } }
     if (angDist < e.def.aggro) {
       if (bh === 'caster') {                              // 詠唱: 距離を取りつつ弾を撃つ
         const want = e.def.atkRange * 0.55;
         const move = (angDist < want ? -1 : 0.6) * e.def.speed * dt / PLANET_R; // 近いと後退
         _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, move).normalize();
-        if (e.atkCD <= 0) { e.atkCD = 2.0; spawnProjectile(e.dir.clone(), pDir.clone(), e.def.atk); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.4), 0xc78aff, 4); }
+        if (e.atkCD <= 0) { e.atkCD = 2.0; spawnProjectile(e.dir.clone(), pDir.clone(), e.atk); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.4), 0xc78aff, 4); }
       } else if (angDist > e.def.atkRange) {              // 追尾（突進敵は接近時バースト）
         if (bh === 'charge' && e.atkCD <= 0 && angDist < e.def.aggro * 0.7) { e.chargeT = 0.5; e.atkCD = 2.4; }
         const sp = e.def.speed * (e.chargeT > 0 ? 2.6 : 1);
@@ -1325,7 +1362,7 @@ function combatUpdate(dt, t) {
       } else if (e.atkCD <= 0) {                          // 近接攻撃
         if (e.isBoss) { e.atkCD = 2.2; e.slamT = 0.5; shakeT = Math.max(shakeT, 0.4); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 0.5), 0xff7e6a, 16); }
         else e.atkCD = 1.3;
-        hurtPlayer(e.def.atk, e.dir);
+        hurtPlayer(e.atk, e.dir);
       }
     } else if (!e.isBoss) {                                // 徘徊
       if (!e.wander || e.wanderCD <= 0) { e.wander = randDir(); e.wanderCD = 2 + Math.random() * 2; }
