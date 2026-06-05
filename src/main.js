@@ -169,10 +169,10 @@ scene.add(planet);
 
 // ============================================================ 惑星テーマ（多惑星ワープ）
 const THEMES = [
-  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null,     emissive: 0x000000, emI: 0,    snow: false, pool: ['slime', 'bat', 'mushroom', 'splitter'], bossKind: 'slime', bossName: 'スライム王 KING SLIME' },
-  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xeaf4ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff, emissive: 0x223344, emI: 0.12, snow: true,  pool: ['crystal', 'bat', 'splitter', 'crystal'], bossKind: 'frost', bossName: 'フロストキング FROST KING' },
-  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff6a3a, fog: 0x3a1208, enemyTint: 0xff6a40, emissive: 0xff2200, emI: 0.55, snow: false, pool: ['golem', 'mushroom', 'bat', 'golem'], bossKind: 'magma', bossName: 'マグマロード MAGMA LORD' },
-  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff, emissive: 0x6a1aff, emI: 0.32, snow: false, pool: ['eye', 'caster', 'splitter', 'eye'], bossKind: 'void', bossName: 'ヴォイドアイ VOID EYE' },
+  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null,     emissive: 0x000000, emI: 0,    snow: false, grav: 1,   hazard: 'heal', pool: ['slime', 'bat', 'mushroom', 'splitter'], bossKind: 'slime', bossName: 'スライム王 KING SLIME' },
+  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xeaf4ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff, emissive: 0x223344, emI: 0.12, snow: true,  grav: 1,   hazard: 'ice',  pool: ['crystal', 'bat', 'splitter', 'crystal'], bossKind: 'frost', bossName: 'フロストキング FROST KING' },
+  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff6a3a, fog: 0x3a1208, enemyTint: 0xff6a40, emissive: 0xff2200, emI: 0.55, snow: false, grav: 1.1, hazard: 'lava', pool: ['golem', 'mushroom', 'bat', 'golem'], bossKind: 'magma', bossName: 'マグマロード MAGMA LORD' },
+  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff, emissive: 0x6a1aff, emI: 0.32, snow: false, grav: 0.5, hazard: 'none', pool: ['eye', 'caster', 'splitter', 'eye'], bossKind: 'void', bossName: 'ヴォイドアイ VOID EYE' },
 ];
 let themeIndex = 0, planetMul = 1;
 const fogTheme = new THREE.Color(0x1a2238);
@@ -181,7 +181,8 @@ function applyTheme(i) {
   grassMat.color.set(th.ground);
   grassMat.emissive.set(th.emissive); grassMat.emissiveIntensity = th.emI;
   fogTheme.set(th.fog);
-  if (snow) snow.visible = th.snow;
+  gravMul = th.grav; hazardTimer = 3;
+  if (typeof snow !== 'undefined' && snow) snow.visible = th.snow;
 }
 // 空に浮かぶ他の惑星（装飾）
 for (let i = 0; i < 5; i++) {
@@ -722,19 +723,45 @@ function makePickup(type) {
     const c = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.34, 8), mt); c.rotation.x = Math.PI; c.position.y = -0.16;
     g.add(a, b, c); return g;
   }
+  if (type === 'gear') { const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.34, 0), new THREE.MeshStandardMaterial({ color: 0xffe07a, emissive: 0xff8a00, emissiveIntensity: 1.0, metalness: 0.6, roughness: 0.3 })); return m; }
   return new THREE.Mesh(new THREE.OctahedronGeometry(0.26, 0), new THREE.MeshStandardMaterial({ color: 0x6ad0ff, emissive: 0x113a55, emissiveIntensity: 0.6, roughness: 0.3 }));
 }
-function dropPickup(type, dir) {
+function dropPickup(type, dir, data) {
   const obj = new THREE.Group(); obj.add(makePickup(type));
   obj.position.copy(surfPos(dir, 0.8)); alignUp(obj, dir);
   scene.add(obj);
-  pickups.push({ obj, type, dir: dir.clone().normalize(), t: Math.random() * 9, life: 16 });
+  pickups.push({ obj, type, data, dir: dir.clone().normalize(), t: Math.random() * 9, life: type === 'gear' ? 26 : 16 });
 }
-function collectPickup(type) {
+function collectPickup(type, data) {
   if (type === 'coin') { coins++; score += 5; Audio.sfx('cursor'); }
   else if (type === 'heart') { hero.hp = Math.min(hero.maxHp, hero.hp + 18); Audio.sfx('heal'); showDmg(player.position.clone().addScaledVector(_up, 2.6), 18, 'heal'); }
+  else if (type === 'gear') { gotGear(data); }
   else { gainExp(6); score += 3; Audio.sfx('cursor'); }
   updateHUD();
+}
+
+// ============================================================ 装備 / 词条
+const AFFIX = [
+  { k: 'atk', f: r => 3 + Math.floor(Math.random() * 4 * r), fmt: v => '攻撃 +' + v },
+  { k: 'crit', f: r => 0.04 + Math.random() * 0.05 * r, fmt: v => '会心 +' + Math.round(v * 100) + '%' },
+  { k: 'move', f: r => 0.04 + Math.random() * 0.05 * r, fmt: v => '移動 +' + Math.round(v * 100) + '%' },
+  { k: 'lifesteal', f: r => 0.03 + Math.random() * 0.04 * r, fmt: v => '吸血 +' + Math.round(v * 100) + '%' },
+  { k: 'skillCd', f: r => 0.05 + Math.random() * 0.05 * r, fmt: v => 'スキルCD -' + Math.round(v * 100) + '%' },
+];
+function rollGear(rarity) {
+  const pool = AFFIX.slice(), n = Math.min(pool.length, 1 + rarity), affixes = [];
+  for (let i = 0; i < n; i++) { const a = pool.splice(Math.floor(Math.random() * pool.length), 1)[0]; affixes.push({ k: a.k, v: a.f(rarity), s: '' }); affixes[i].s = a.fmt(affixes[i].v); }
+  const names = ['古びた', '上等な', '輝く'];
+  const power = affixes.reduce((s, a) => s + (a.k === 'atk' ? a.v * 0.8 : a.v * 45), 0);
+  return { rarity, affixes, name: (names[rarity - 1] || '') + '武具', power };
+}
+function recomputeGear() {
+  gearBonus.atk = 0; gearBonus.crit = 0; gearBonus.move = 0; gearBonus.lifesteal = 0; gearBonus.skillCd = 1;
+  if (equippedGear) for (const a of equippedGear.affixes) { if (a.k === 'skillCd') gearBonus.skillCd *= (1 - a.v); else gearBonus[a.k] += a.v; }
+}
+function gotGear(g) {
+  if (!equippedGear || g.power > equippedGear.power) { equippedGear = g; recomputeGear(); Audio.sfx('victory'); showArea('装備獲得: ' + g.name, g.affixes.map(a => a.s).join(' / ')); }
+  else { coins += 4; score += 12; Audio.sfx('cursor'); showArea('武具を換金 +4◆', g.name); }
 }
 function updatePickups(dt) {
   for (let i = pickups.length - 1; i >= 0; i--) {
@@ -744,7 +771,7 @@ function updatePickups(dt) {
     if (ang < 3.0) { _axis.crossVectors(p.dir, pDir).normalize(); p.dir.applyAxisAngle(_axis, Math.min(9 * dt / PLANET_R, ang / PLANET_R)).normalize(); }
     p.obj.position.copy(surfPos(p.dir, 0.85 + Math.sin(p.t * 3) * 0.12));
     alignUp(p.obj, p.dir); p.obj.children[0].rotation.y += dt * 3;
-    if (ang < 1.0 && p.life > 0) { collectPickup(p.type); scene.remove(p.obj); pickups.splice(i, 1); }
+    if (ang < 1.0 && p.life > 0) { collectPickup(p.type, p.data); scene.remove(p.obj); pickups.splice(i, 1); }
     else if (p.life <= 0) { scene.remove(p.obj); pickups.splice(i, 1); }
   }
 }
@@ -778,7 +805,7 @@ function spawnArrow() {
   const axis = new THREE.Vector3().crossVectors(pDir, heading);
   if (axis.lengthSq() < 1e-6) axis.crossVectors(pDir, XAXIS);
   axis.normalize();
-  arrows.push({ mesh: m, dir: pDir.clone(), axis, life: 2.2, speed: 17, dmg: 12 + hero.level * 2 + atkBonus + bowPower * 6 });
+  arrows.push({ mesh: m, dir: pDir.clone(), axis, life: 2.2, speed: 17, dmg: 12 + hero.level * 2 + atkBonus + gearBonus.atk + bowPower * 6 });
 }
 function updateArrowsP(dt) {
   for (let i = arrows.length - 1; i >= 0; i--) {
@@ -790,8 +817,9 @@ function updateArrowsP(dt) {
       if (!e.alive) continue;
       const ang = Math.acos(THREE.MathUtils.clamp(p.dir.dot(e.dir), -1, 1)) * PLANET_R;
       if (ang < e.def.scale * 0.9 + 0.7) {
-        const crit = Math.random() < 0.2, tot = crit ? p.dmg * 2 : p.dmg;
+        const crit = Math.random() < 0.2 + gearBonus.crit, tot = crit ? p.dmg * 2 : p.dmg;
         e.hp -= tot; e.hitFlash = 0.18;
+        if (gearBonus.lifesteal > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * gearBonus.lifesteal);
         showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), tot, crit ? 'crit' : '');
         spawnImpact(p.mesh.position.clone(), 0xffe6a0, 5); Audio.sfx('hit');
         if (e.hp <= 0) killEnemy(e);
@@ -888,6 +916,10 @@ let comboCount = 0, comboTimer = 0, comboHeavy = false, pendingLand = false;
 let skillT = 0, skillCD = 0;
 let atkBonus = 0, moveMul = 1, atkCdMul = 1, dashCdMul = 1, skillCdMul = 1;
 let skillPoints = 0, weapon = 'sword', bowUnlocked = false, bowPower = 0;
+let airSlam = false, dashAttack = false;                 // 連段派生
+let gravMul = 1, hazardTimer = 0, regenT = 0;            // 各星の機構
+let equippedGear = null;                                  // 装備
+const gearBonus = { atk: 0, crit: 0, move: 0, lifesteal: 0, skillCd: 1 };
 let pendingLevels = 0;
 const ATTACK_DUR = 0.32, ATTACK_RANGE = 3.6, JUMP_V = 7.5, GRAVITY = 20, DASH_T = 0.22, DASH_SPEED = 22, DASH_CD = 0.55;
 const SKILL_DUR = 0.5, SKILL_CD = 3.5, SKILL_RANGE = 6.0;
@@ -898,6 +930,15 @@ function doAttack() {
   if (weapon === 'bow' && bowUnlocked) {        // 弓: 遠距離の矢
     attackT = 0.2; attackCD = 0.34 * atkCdMul; comboHeavy = false;
     spawnArrow(); Audio.sfx('attack'); return;
+  }
+  if (!grounded && jumpH > 0.3) {               // 空中攻撃 → 着地スラム
+    if (airSlam) return; airSlam = true; attackT = 0.3; attackCD = 0.45; jumpV = Math.min(jumpV, -4);
+    Audio.sfx('attack'); return;
+  }
+  if (dashT > 0) {                              // ダッシュ斬り（強・広範囲・前進）
+    dashAttack = true; comboHeavy = true; comboCount = 3; comboTimer = 0.7;
+    attackT = ATTACK_DUR; attackCD = 0.45 * atkCdMul; attackHit = false; dashT = Math.max(dashT, 0.14);
+    Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.12); return;
   }
   comboCount = (comboTimer > 0) ? (comboCount % 3) + 1 : 1;  // 1→2→3 の連舞
   comboTimer = 0.7; comboHeavy = comboCount >= 3;
@@ -911,7 +952,7 @@ function switchWeapon() {
 }
 function doSkill() {
   if (gameState !== 'field' || skillCD > 0) return;
-  skillT = SKILL_DUR; skillCD = SKILL_CD * skillCdMul; invulnT = Math.max(invulnT, 0.35);
+  skillT = SKILL_DUR; skillCD = SKILL_CD * skillCdMul * gearBonus.skillCd; invulnT = Math.max(invulnT, 0.35);
   Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
   spawnImpact(player.position.clone().addScaledVector(pDir, 1.0), 0xbf8aff, 14);
   // 周囲360°に大ダメージ
@@ -919,7 +960,7 @@ function doSkill() {
   for (const e of enemies) {
     if (!e.alive) continue;
     if (pDir.dot(e.dir) < co) continue;
-    const dmg = 22 + hero.level * 3 + atkBonus * 2;
+    const dmg = 22 + hero.level * 3 + atkBonus * 2 + gearBonus.atk * 2;
     e.hp -= dmg; e.hitFlash = 0.2;
     showDmg(e.model.root.position.clone().addScaledVector(e.dir, 1.8), dmg, 'crit');
     spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.2), 0xbf8aff, 5);
@@ -956,8 +997,10 @@ function killEnemy(e) {
   dropPickup('coin', e.dir);
   if (Math.random() < 0.26) dropPickup('heart', e.dir);
   if (Math.random() < 0.5) dropPickup('gem', e.dir);
+  if (Math.random() < 0.05) dropPickup('gear', e.dir, rollGear(1 + (Math.random() < 0.3 ? 1 : 0)));
   if (e.isBoss) {
     bossRef = null; bossbarEl.style.display = 'none'; slowMo = 1.0;
+    dropPickup('gear', e.dir, rollGear(2 + (Math.random() < 0.4 ? 1 : 0)));   // ボスは確定で良装備
     for (let i = 0; i < 8; i++) dropPickup('coin', randDir().lerp(e.dir, 0.5).normalize());
     hero.hp = hero.maxHp; Audio.sfx('victory');
     showArea(THEMES[e.theme].bossName + ' 撃破！', 'BOSS DEFEATED');
@@ -1104,6 +1147,7 @@ function restartRun() {
   hero.hp = 100; hero.maxHp = 100; hero.exp = 0; hero.level = 1;
   atkBonus = 0; moveMul = 1; atkCdMul = 1; dashCdMul = 1; skillCdMul = 1; skillPoints = 0;
   weapon = 'sword'; bowUnlocked = false; bowPower = 0; for (const nd of TREE_NODES) nd.lv = 0;
+  equippedGear = null; recomputeGear(); airSlam = false; dashAttack = false; gravMul = 1;
   score = 0; coins = 0; planetMul = 1; themeIndex = 0; applyTheme(0);
   pDir.set(0, 1, 0); jumpH = 0; jumpV = 0; grounded = true; invulnT = 1;
   wave = 0; gameState = 'field'; startWave(1); updateHUD();
@@ -1116,15 +1160,41 @@ goRestartEl.addEventListener('touchstart', e => { e.preventDefault(); restartRun
 const aoes = [];
 const aoeRingGeo = new THREE.RingGeometry(0.82, 1.0, 36);
 const aoeFillGeo = new THREE.CircleGeometry(1.0, 36);
-function spawnAoe(dir, r, dmg) {
+function spawnAoe(dir, r, dmg, color = 0xff3a3a) {
   const grp = new THREE.Group();
-  const ring = new THREE.Mesh(aoeRingGeo, new THREE.MeshBasicMaterial({ color: 0xff3a3a, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
-  const fill = new THREE.Mesh(aoeFillGeo, new THREE.MeshBasicMaterial({ color: 0xff3a3a, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }));
+  const ring = new THREE.Mesh(aoeRingGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
+  const fill = new THREE.Mesh(aoeFillGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }));
   grp.add(ring, fill); grp.scale.setScalar(r);
   grp.position.copy(surfPos(dir, 0.15));
   grp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
   scene.add(grp);
   aoes.push({ grp, ring, fill, dir: dir.clone().normalize(), r, t: 1.1, max: 1.1, dmg });
+}
+// プレイヤー中心の即時AoEダメージ（スラム/ダッシュ斬りなど）
+function aoeDamage(r, dmg, color = 0xfff2c0) {
+  spawnImpact(surfPos(pDir, 0.4), color, 16); shakeT = Math.max(shakeT, 0.28);
+  const co = Math.cos(r / PLANET_R);
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if (pDir.dot(e.dir) < co) continue;
+    e.hp -= dmg; e.hitFlash = 0.18;
+    showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), dmg, 'crit');
+    _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.1).normalize();
+    if (e.hp <= 0) killEnemy(e);
+  }
+}
+// 各星の専属機構（環境ハザード/重力/回復）
+function planetHazard(dt, t) {
+  const th = THEMES[themeIndex];
+  if (th.hazard === 'lava') {
+    hazardTimer -= dt;
+    if (hazardTimer <= 0) { hazardTimer = 2.6; for (let i = 0; i < 2; i++) { const d = pDir.clone().applyAxisAngle(randDir(), 0.1 + Math.random() * 0.3).normalize(); spawnAoe(d, 4.2, Math.round(10 * planetMul), 0xff5a20); } }
+  } else if (th.hazard === 'ice') {
+    hazardTimer -= dt;
+    if (hazardTimer <= 0) { hazardTimer = 3.2; const d = pDir.clone().applyAxisAngle(randDir(), 0.15 + Math.random() * 0.3).normalize(); spawnAoe(d, 4.0, Math.round(9 * planetMul), 0x9fe0ff); }
+  } else if (th.hazard === 'heal') {        // 草原: ゆっくり回復
+    regenT -= dt; if (regenT <= 0 && hurtFlash <= 0) { regenT = 1; hero.hp = Math.min(hero.maxHp, hero.hp + 1); updateHUD(); }
+  }
 }
 function updateAoes(dt) {
   for (let i = aoes.length - 1; i >= 0; i--) {
@@ -1510,10 +1580,12 @@ function combatUpdate(dt, t) {
       const d = pDir.dot(e.dir); if (d < co) continue;
       _md.copy(e.dir).addScaledVector(pDir, -d);
       if (_md.lengthSq() < 1e-6 || _md.normalize().dot(heading) < cone) continue;
-      let dmg = 8 + hero.level * 2 + atkBonus + Math.floor(Math.random() * 5);
+      let dmg = 8 + hero.level * 2 + atkBonus + gearBonus.atk + Math.floor(Math.random() * 5);
       if (comboHeavy) dmg = Math.floor(dmg * 1.8);
-      const crit = Math.random() < 0.2; const tot = crit ? dmg * 2 : dmg;
+      if (dashAttack) dmg = Math.floor(dmg * 1.4);
+      const crit = Math.random() < 0.2 + gearBonus.crit; const tot = crit ? dmg * 2 : dmg;
       e.hp -= tot; e.hitFlash = 0.18;
+      if (gearBonus.lifesteal > 0) { hero.hp = Math.min(hero.maxHp, hero.hp + tot * gearBonus.lifesteal); }
       if (crit || comboHeavy) hitStop = Math.max(hitStop, 0.05); // 顿帧
       showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3.2 : 1.8), tot, crit ? 'crit' : '');
       spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 2.2 : 1.2), 0xfff2c0, crit ? 8 : 5);
@@ -1521,6 +1593,7 @@ function combatUpdate(dt, t) {
       if (!e.isBoss) { _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.07).normalize(); }
       if (e.hp <= 0) killEnemy(e);
     }
+    dashAttack = false;
   }
   // 敵の挙動
   for (const e of enemies) {
@@ -1593,7 +1666,7 @@ function update(dt, t) {
     const inMag = Math.hypot(ix, iy);
     if (inMag > 1) { ix /= inMag; iy /= inMag; }
     dash = keys['shift'] || joyVec.mag > 0.9;
-    const speed = (dash ? 11 : 6) * moveMul;
+    const speed = (dash ? 11 : 6) * moveMul * (1 + gearBonus.move);
     playerMoving = inMag > 0.05 || dashT > 0;
     if (playerMoving) {
       let dir3, arc;
@@ -1614,6 +1687,7 @@ function update(dt, t) {
     updateArrowsP(dt);
     updateAoes(dt);
     updatePickups(dt);
+    planetHazard(dt, t);
     // ウェーブ進行：全滅したら少し待って次のウェーブ
     if (waveBreak > 0) { waveBreak -= dt; if (waveBreak <= 0) startWave(wave + 1); }
     else if (enemies.length === 0) { waveBreak = 2.4; score += 50; saveBest(); showArea('WAVE ' + wave + ' クリア！', '+50'); updateHUD(); }
@@ -1621,12 +1695,13 @@ function update(dt, t) {
     camRot = 0;
   }
 
-  // --- ジャンプ物理（法線方向）---
+  // --- ジャンプ物理（法線方向・重力は星で変化）---
   if (!grounded || jumpV !== 0) {
-    jumpV -= GRAVITY * dt; jumpH += jumpV * dt;
+    jumpV -= GRAVITY * gravMul * dt; jumpH += jumpV * dt;
     if (jumpH <= 0) {
       jumpH = 0; jumpV = 0; grounded = true;
-      if (pendingLand) { pendingLand = false; shakeT = Math.max(shakeT, 0.35); spawnImpact(surfPos(pDir, 0.4), 0xffffff, 16); Audio.sfx('hit'); } // 着地
+      if (pendingLand) { pendingLand = false; shakeT = Math.max(shakeT, 0.35); spawnImpact(surfPos(pDir, 0.4), 0xffffff, 16); Audio.sfx('hit'); }
+      if (airSlam) { airSlam = false; aoeDamage(4.6, 16 + hero.level * 2 + atkBonus + gearBonus.atk, 0xfff2c0); Audio.sfx('skill'); }
     }
   }
 

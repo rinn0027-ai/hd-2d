@@ -66,36 +66,68 @@ export function sfx(name) {
 }
 
 // ---- BGM（簡易シーケンサ） ----
-// 昼=明るい長調アルペジオ / 夜=穏やかな短調
+// 16ステップ(8分音符)の旋律パターン + 4コードのベース進行 + ドラム
+// 0 = 休符
 const SONGS = {
-  day:   { tempo: 300, scale: [262, 330, 392, 523, 392, 330], bass: [131, 131, 196, 196], wave: 'triangle' },
-  night: { tempo: 420, scale: [220, 262, 330, 262, 196, 262], bass: [110, 110, 147, 98], wave: 'sine' },
-  battle:{ tempo: 200, scale: [294, 349, 440, 587, 440, 349], bass: [147, 147, 175, 196], wave: 'sawtooth' },
-  snow:  { tempo: 460, scale: [330, 392, 494, 587, 494, 392], bass: [98, 131, 147, 131], wave: 'sine' },     // 澄んだ高音
-  lava:  { tempo: 230, scale: [196, 233, 294, 233, 175, 233], bass: [87, 87, 116, 98], wave: 'sawtooth' },   // 重い低音
-  alien: { tempo: 300, scale: [277, 370, 415, 311, 466, 370], bass: [104, 139, 117, 156], wave: 'square' },  // 不協和な異界
+  day:   { tempo: 215, wave: 'triangle', drums: true,
+    mel:  [392, 0, 330, 392, 440, 0, 392, 330, 349, 0, 294, 349, 392, 0, 440, 392],
+    bass: [131, 196, 220, 175] },                                 // C G Am F
+  night: { tempo: 300, wave: 'sine', drums: false,
+    mel:  [330, 0, 294, 0, 262, 0, 294, 330, 247, 0, 220, 0, 262, 0, 0, 0],
+    bass: [110, 98, 131, 110] },                                  // Am G C Am
+  snow:  { tempo: 200, wave: 'sine', drums: true,
+    mel:  [523, 494, 587, 0, 659, 587, 494, 0, 440, 494, 587, 0, 523, 0, 659, 0],
+    bass: [131, 175, 196, 147] },                                 // C F G Dm(明るい)
+  lava:  { tempo: 190, wave: 'sawtooth', drums: true,
+    mel:  [175, 0, 175, 208, 196, 0, 175, 0, 147, 0, 175, 208, 233, 0, 196, 0],
+    bass: [87, 87, 116, 98], lp: 900 },                           // 低く重い
+  alien: { tempo: 205, wave: 'square', drums: true,
+    mel:  [311, 0, 370, 415, 0, 370, 311, 0, 277, 415, 0, 466, 415, 0, 370, 0],
+    bass: [104, 139, 117, 156], lp: 1100 },                       // 不協和
+  battle:{ tempo: 170, wave: 'sawtooth', drums: true,
+    mel:  [294, 349, 440, 349, 587, 440, 349, 294, 330, 392, 494, 392, 294, 0, 587, 0],
+    bass: [147, 147, 175, 196] },
 };
-function bgmNote(freq, dur, wave, vol) {
-  if (!ctx) return;
+function bgmNote(freq, dur, wave, vol, lp = 1500) {
+  if (!ctx || !freq) return;
   const t = ctx.currentTime;
   const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
-  f.type = 'lowpass'; f.frequency.value = 1400;
+  f.type = 'lowpass'; f.frequency.value = lp;
   o.type = wave; o.frequency.value = freq;
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(vol, t + 0.03);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.02);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   o.connect(f); f.connect(g); g.connect(bgmGain); o.start(t); o.stop(t + dur + 0.05);
 }
+function drum(kind) {
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  if (kind === 'kick') {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(155, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.12);
+    g.gain.setValueAtTime(0.45, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    o.connect(g); g.connect(bgmGain); o.start(t); o.stop(t + 0.18);
+  } else {
+    const dur = kind === 'snare' ? 0.16 : 0.04;
+    const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1);
+    const n = ctx.createBufferSource(); n.buffer = buf;
+    const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = kind === 'snare' ? 1100 : 6500;
+    const g = ctx.createGain(); g.gain.setValueAtTime(kind === 'snare' ? 0.22 : 0.09, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    n.connect(f); f.connect(g); g.connect(bgmGain); n.start(t);
+  }
+}
 function startBGM() {
-  if (bgmTimer) clearInterval(bgmTimer);
+  if (bgmTimer) clearTimeout(bgmTimer);
   const tick = () => {
     const s = SONGS[mood] || SONGS.day;
-    const mel = s.scale[step % s.scale.length];
-    bgmNote(mel, s.tempo / 1000 * 1.4, s.wave, 0.18);
-    if (step % 2 === 0) bgmNote(s.bass[(step / 2) % s.bass.length | 0], s.tempo / 1000 * 2, 'triangle', 0.16);
-    if (step % 4 === 2) bgmNote(mel * 2, s.tempo / 1000, s.wave, 0.08); // 上のハモり
+    const i = step % 16, beat = s.tempo / 1000;
+    const mel = s.mel[i];
+    if (mel) { bgmNote(mel, beat * 1.7, s.wave, 0.15, s.lp || 1500); if (i % 8 === 0) bgmNote(mel * 2, beat * 1.4, s.wave, 0.05); }
+    if (i % 4 === 0) bgmNote(s.bass[(i / 4) % 4], beat * 3.6, 'triangle', 0.2, 700);   // ベース（コード根音）
+    if (s.drums) { if (i % 4 === 0) drum('kick'); if (i === 4 || i === 12) drum('snare'); if (i % 2 === 1) drum('hat'); }
     step++;
-    bgmTimer = setTimeout(tick, (SONGS[mood] || SONGS.day).tempo);
+    bgmTimer = setTimeout(tick, s.tempo);
   };
   tick();
 }
