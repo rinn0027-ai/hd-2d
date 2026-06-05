@@ -709,23 +709,27 @@ function updateHUD() {
   hudLv.textContent = 'Lv ' + hero.level;
   hudExp.textContent = `EXP ${hero.exp}/${expToNext(hero.level)}`;
   hudWave.textContent = 'WAVE ' + wave;
-  hudScore.textContent = 'SCORE ' + score;
+  hudScore.textContent = 'SCORE ' + score + ' (BEST W' + best.wave + ')';
   hudCoins.textContent = '◆ ' + coins;
 }
 function gainExp(n) {
   hero.exp += n;
   while (hero.exp >= expToNext(hero.level)) {
-    hero.exp -= expToNext(hero.level); hero.level++; hero.maxHp += 14; hero.hp = hero.maxHp;
-    Audio.sfx('victory'); showArea('レベルアップ！ Lv ' + hero.level, 'LEVEL UP');
+    hero.exp -= expToNext(hero.level); hero.level++; pendingLevels++;
+    hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.3);
+    Audio.sfx('victory');
   }
   updateHUD();
+  if (pendingLevels > 0 && gameState !== 'levelup') openLevelUp();
 }
 
-// アクション状態
+// アクション状態 / 強化
 let dashT = 0, dashCD = 0, jumpH = 0, jumpV = 0, grounded = true;
 let attackT = 0, attackCD = 0, attackHit = false, invulnT = 0, hurtFlash = 0, shakeT = 0;
 let comboCount = 0, comboTimer = 0, comboHeavy = false;
 let skillT = 0, skillCD = 0;
+let atkBonus = 0, moveMul = 1, atkCdMul = 1, dashCdMul = 1, skillCdMul = 1; // 祝福による強化
+let pendingLevels = 0;
 const ATTACK_DUR = 0.32, ATTACK_RANGE = 3.6, JUMP_V = 7.5, GRAVITY = 20, DASH_T = 0.22, DASH_SPEED = 22, DASH_CD = 0.55;
 const SKILL_DUR = 0.5, SKILL_CD = 3.5, SKILL_RANGE = 6.0;
 const hurtEl = document.getElementById('hurt');
@@ -734,12 +738,12 @@ function doAttack() {
   if (gameState !== 'field' || attackCD > 0 || skillT > 0) return;
   comboCount = (comboTimer > 0) ? (comboCount % 3) + 1 : 1;  // 1→2→3 の連舞
   comboTimer = 0.7; comboHeavy = comboCount >= 3;
-  attackT = ATTACK_DUR; attackCD = comboHeavy ? 0.5 : 0.32; attackHit = false;
+  attackT = ATTACK_DUR; attackCD = (comboHeavy ? 0.5 : 0.32) * atkCdMul; attackHit = false;
   Audio.sfx(comboHeavy ? 'skill' : 'attack');
 }
 function doSkill() {
   if (gameState !== 'field' || skillCD > 0) return;
-  skillT = SKILL_DUR; skillCD = SKILL_CD; invulnT = Math.max(invulnT, 0.35);
+  skillT = SKILL_DUR; skillCD = SKILL_CD * skillCdMul; invulnT = Math.max(invulnT, 0.35);
   Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
   spawnImpact(player.position.clone().addScaledVector(pDir, 1.0), 0xbf8aff, 14);
   // 周囲360°に大ダメージ
@@ -747,7 +751,7 @@ function doSkill() {
   for (const e of enemies) {
     if (!e.alive) continue;
     if (pDir.dot(e.dir) < co) continue;
-    const dmg = 22 + hero.level * 3;
+    const dmg = 22 + hero.level * 3 + atkBonus * 2;
     e.hp -= dmg; e.hitFlash = 0.2;
     showDmg(e.model.root.position.clone().addScaledVector(e.dir, 1.8), dmg, 'crit');
     spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.2), 0xbf8aff, 5);
@@ -759,7 +763,7 @@ function doJump() {
   if (gameState === 'field' && grounded) { jumpV = JUMP_V; grounded = false; Audio.sfx('cursor'); }
 }
 function doDash() {
-  if (gameState === 'field' && dashCD <= 0) { dashT = DASH_T; dashCD = DASH_CD; invulnT = Math.max(invulnT, DASH_T + 0.05); Audio.sfx('skill'); }
+  if (gameState === 'field' && dashCD <= 0) { dashT = DASH_T; dashCD = DASH_CD * dashCdMul; invulnT = Math.max(invulnT, DASH_T + 0.05); Audio.sfx('skill'); }
 }
 function hurtPlayer(dmg, fromDir) {
   if (invulnT > 0 || dashT > 0) return;
@@ -770,6 +774,7 @@ function hurtPlayer(dmg, fromDir) {
   if (hero.hp <= 0) respawnPlayer();
 }
 function respawnPlayer() {
+  saveBest();
   hero.hp = hero.maxHp; pDir.set(0, 1, 0); invulnT = 1.4; jumpH = 0; jumpV = 0; grounded = true;
   for (const e of enemies) if (e.alive && pDir.dot(e.dir) > 0.3) e.dir.copy(randDir());
   showArea('やられた… 復活', 'RESPAWN');
@@ -799,6 +804,77 @@ function killEnemy(e) {
     }
   }
   updateHUD();
+}
+
+// ============================================================ レベルアップの祝福
+const UPGRADES = [
+  { ic: '⚔️', nm: '剛力', ds: '攻撃力 +6', ap: () => { atkBonus += 6; } },
+  { ic: '❤️', nm: '生命', ds: '最大HP +25・全回復', ap: () => { hero.maxHp += 25; hero.hp = hero.maxHp; } },
+  { ic: '🏃', nm: '俊足', ds: '移動速度 +12%', ap: () => { moveMul *= 1.12; } },
+  { ic: '🌀', nm: '連撃', ds: '攻撃速度 +15%', ap: () => { atkCdMul *= 0.85; } },
+  { ic: '✨', nm: '術理', ds: 'スキルCD -20%', ap: () => { skillCdMul *= 0.8; } },
+  { ic: '💨', nm: '回避', ds: 'ダッシュCD -25%', ap: () => { dashCdMul *= 0.75; } },
+];
+const levelupEl = document.getElementById('levelup'), luOptsEl = document.getElementById('luOpts');
+let luChoices = [];
+function openLevelUp() {
+  gameState = 'levelup';
+  const pool = UPGRADES.slice(); luChoices = [];
+  for (let i = 0; i < 3 && pool.length; i++) luChoices.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  luOptsEl.innerHTML = '';
+  luChoices.forEach((u, i) => {
+    const c = document.createElement('div'); c.className = 'luCard';
+    c.innerHTML = `<div class="ic">${u.ic}</div><div class="nm">${i + 1}. ${u.nm}</div><div class="ds">${u.ds}</div>`;
+    c.addEventListener('click', () => pickUpgrade(i));
+    c.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); pickUpgrade(i); }, { passive: false });
+    luOptsEl.appendChild(c);
+  });
+  levelupEl.style.display = 'flex';
+}
+function pickUpgrade(i) {
+  if (gameState !== 'levelup' || !luChoices[i]) return;
+  luChoices[i].ap(); Audio.sfx('confirm'); pendingLevels--;
+  updateHUD();
+  if (pendingLevels > 0) openLevelUp();
+  else { levelupEl.style.display = 'none'; luChoices = []; gameState = 'field'; showArea('Lv ' + hero.level + ' になった！', 'LEVEL UP'); }
+}
+
+// ============================================================ ボスの範囲攻撃（地面の赤円→爆発）
+const aoes = [];
+const aoeRingGeo = new THREE.RingGeometry(0.82, 1.0, 36);
+const aoeFillGeo = new THREE.CircleGeometry(1.0, 36);
+function spawnAoe(dir, r, dmg) {
+  const grp = new THREE.Group();
+  const ring = new THREE.Mesh(aoeRingGeo, new THREE.MeshBasicMaterial({ color: 0xff3a3a, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
+  const fill = new THREE.Mesh(aoeFillGeo, new THREE.MeshBasicMaterial({ color: 0xff3a3a, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }));
+  grp.add(ring, fill); grp.scale.setScalar(r);
+  grp.position.copy(surfPos(dir, 0.15));
+  grp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+  scene.add(grp);
+  aoes.push({ grp, ring, fill, dir: dir.clone().normalize(), r, t: 1.1, max: 1.1, dmg });
+}
+function updateAoes(dt) {
+  for (let i = aoes.length - 1; i >= 0; i--) {
+    const a = aoes[i]; a.t -= dt;
+    const pulse = 0.4 + 0.5 * Math.abs(Math.sin(a.t * 14));
+    a.ring.material.opacity = pulse; a.fill.material.opacity = 0.12 + (1 - a.t / a.max) * 0.25;
+    if (a.t <= 0) {
+      spawnImpact(surfPos(a.dir, 0.6), 0xff5a3a, 16); shakeT = Math.max(shakeT, 0.32);
+      const ang = Math.acos(THREE.MathUtils.clamp(pDir.dot(a.dir), -1, 1)) * PLANET_R;
+      if (ang < a.r) hurtPlayer(a.dmg, a.dir);
+      scene.remove(a.grp); a.ring.material.dispose(); a.fill.material.dispose(); aoes.splice(i, 1);
+    }
+  }
+}
+
+// ============================================================ セーブ（最高記録）
+let best = { wave: 1, score: 0 };
+try { const s = JSON.parse(localStorage.getItem('hd2d_best')); if (s) best = s; } catch (e) { }
+function saveBest() {
+  let ch = false;
+  if (wave > best.wave) { best.wave = wave; ch = true; }
+  if (score > best.score) { best.score = score; ch = true; }
+  if (ch) try { localStorage.setItem('hd2d_best', JSON.stringify(best)); } catch (e) { }
 }
 
 // ============================================================ 交互作用（最寄りのNPC/宝箱）
@@ -840,6 +916,7 @@ addEventListener('touchstart', kickAudio, { once: true });
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   keys[k] = true;
+  if (gameState === 'levelup') { if (k === '1' || k === '2' || k === '3') pickUpgrade(+k - 1); return; }
   if (k === 'j') { doAttack(); }
   else if (k === ' ') { doJump(); e.preventDefault(); }
   else if (k === 'k') { doDash(); }
@@ -898,7 +975,7 @@ function endJoy() {
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #levelup')); }
 
 // タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
 function assignRoles() {
@@ -1132,7 +1209,7 @@ function combatUpdate(dt, t) {
       const d = pDir.dot(e.dir); if (d < co) continue;
       _md.copy(e.dir).addScaledVector(pDir, -d);
       if (_md.lengthSq() < 1e-6 || _md.normalize().dot(heading) < cone) continue;
-      let dmg = 8 + hero.level * 2 + Math.floor(Math.random() * 5);
+      let dmg = 8 + hero.level * 2 + atkBonus + Math.floor(Math.random() * 5);
       if (comboHeavy) dmg = Math.floor(dmg * 1.8);
       const crit = Math.random() < 0.2; const tot = crit ? dmg * 2 : dmg;
       e.hp -= tot; e.hitFlash = 0.18;
@@ -1156,6 +1233,7 @@ function combatUpdate(dt, t) {
     const d = THREE.MathUtils.clamp(pDir.dot(e.dir), -1, 1);
     const angDist = Math.acos(d) * PLANET_R;
     const bh = e.def.behavior;
+    if (e.isBoss) { e.castCD = (e.castCD || 3) - dt; if (e.castCD <= 0 && angDist < 20) { e.castCD = 4.5; spawnAoe(pDir.clone(), 4.8, Math.round(e.def.atk * 1.1)); } }
     if (angDist < e.def.aggro) {
       if (bh === 'caster') {                              // 詠唱: 距離を取りつつ弾を撃つ
         const want = e.def.atkRange * 0.55;
@@ -1214,7 +1292,7 @@ function update(dt, t) {
     const inMag = Math.hypot(ix, iy);
     if (inMag > 1) { ix /= inMag; iy /= inMag; }
     dash = keys['shift'] || joyVec.mag > 0.9;
-    const speed = dash ? 11 : 6;
+    const speed = (dash ? 11 : 6) * moveMul;
     playerMoving = inMag > 0.05 || dashT > 0;
     if (playerMoving) {
       let dir3, arc;
@@ -1232,10 +1310,11 @@ function update(dt, t) {
     }
     combatUpdate(dt, t);
     updateProjectiles(dt);
+    updateAoes(dt);
     updatePickups(dt);
     // ウェーブ進行：全滅したら少し待って次のウェーブ
     if (waveBreak > 0) { waveBreak -= dt; if (waveBreak <= 0) startWave(wave + 1); }
-    else if (enemies.length === 0) { waveBreak = 2.4; score += 50; showArea('WAVE ' + wave + ' クリア！', '+50'); updateHUD(); }
+    else if (enemies.length === 0) { waveBreak = 2.4; score += 50; saveBest(); showArea('WAVE ' + wave + ' クリア！', '+50'); updateHUD(); }
   } else {
     camRot = 0;
   }
@@ -1307,8 +1386,8 @@ function animate() {
   composer.render();
 }
 
-// 起動時にエリア名を表示
-setTimeout(() => showArea('まるい大地', 'TINY PLANET'), 600);
+// 起動時にエリア名 + 自己ベスト
+setTimeout(() => showArea('まるい大地', best.wave > 1 ? 'BEST WAVE ' + best.wave : 'TINY PLANET'), 600);
 
 // 起動
 startWave(1);
