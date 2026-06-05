@@ -889,7 +889,14 @@ function showDmg(worldPos, val, cls = '') {
 
 // HUD
 const hudHp = document.getElementById('hudHp'), hudHpTxt = document.getElementById('hudHpTxt'), hudLv = document.getElementById('hudLv'), hudExp = document.getElementById('hudExp');
-const hudWave = document.getElementById('hudWave'), hudScore = document.getElementById('hudScore'), hudCoins = document.getElementById('hudCoins');
+const hudWave = document.getElementById('hudWave'), hudScore = document.getElementById('hudScore'), hudCoins = document.getElementById('hudCoins'), hudCd = document.getElementById('hudCd');
+function updateCooldownUI() {
+  // ボタンに残りCDを表示＋クールダウン中は暗く
+  if (btnSkill) { const c = skillT > 0 || skillCD > 0; btnSkill.classList.toggle('cool', c); btnSkill.textContent = skillCD > 0 ? skillCD.toFixed(1) : 'SKILL'; }
+  if (btnDash) { btnDash.classList.toggle('cool', dashCD > 0); btnDash.textContent = dashCD > 0 ? dashCD.toFixed(1) : 'DASH'; }
+  // HUD読数（PCでも見える）
+  hudCd.textContent = `スキル ${skillCD > 0 ? skillCD.toFixed(1) + 's' : 'READY'} ・ ダッシュ ${dashCD > 0 ? dashCD.toFixed(1) + 's' : 'READY'}`;
+}
 function updateHUD() {
   hudHp.style.width = Math.max(0, hero.hp / hero.maxHp * 100) + '%';
   hudHpTxt.textContent = `HP ${Math.max(0, Math.ceil(hero.hp))}/${hero.maxHp}`;
@@ -1741,6 +1748,7 @@ function update(dt, t) {
   updateArrows();
   nearTarget = findInteract();
   updatePrompt();
+  updateCooldownUI();
 
   // --- DOFのピント ---
   bokeh.uniforms['focus'].value = camera.position.distanceTo(player.position);

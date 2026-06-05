@@ -105,6 +105,8 @@
       box-shadow: 0 4px 14px rgba(0,0,0,.5); display: none; pointer-events: auto; user-select: none;
     }
     .actBtn:active { transform: scale(.94); }
+    .actBtn.cool { opacity: .45; }
+    .actBtn .cd { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; color: #fff; text-shadow: 0 1px 3px #000; }
     body.touch .actBtn { display: block; }
     #btnJump { right: 110px; bottom: 92px; }
     #btnDash { right: 30px; bottom: 196px; background: radial-gradient(circle at 38% 34%, rgba(120,200,170,.95), rgba(50,120,95,.92)); }
@@ -300,6 +302,7 @@
     <div class="hpbar"><i id="hudHp"></i></div>
     <div class="hptxt"><span id="hudHpTxt"></span></div>
     <div class="lv" style="margin-top:6px"><span id="hudWave" style="color:#ffd27a"></span> &nbsp; <span id="hudScore"></span> &nbsp; <span id="hudCoins" style="color:#ffd23a"></span></div>
+    <div class="hptxt" id="hudCd" style="margin-top:4px"></div>
   </div>
   <div id="ebars"></div>
   <div id="navArrows">
