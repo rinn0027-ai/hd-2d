@@ -169,14 +169,20 @@ scene.add(planet);
 
 // ============================================================ 惑星テーマ（多惑星ワープ）
 const THEMES = [
-  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null },
-  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xbfe0ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff },
-  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff7a4a, fog: 0x3a1810, enemyTint: 0xff6a40 },
-  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff },
+  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null,     emissive: 0x000000, emI: 0,    snow: false },
+  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xeaf4ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff, emissive: 0x223344, emI: 0.12, snow: true },
+  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff6a3a, fog: 0x3a1208, enemyTint: 0xff6a40, emissive: 0xff2200, emI: 0.55, snow: false },
+  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff, emissive: 0x6a1aff, emI: 0.32, snow: false },
 ];
 let themeIndex = 0, planetMul = 1;
-function applyTheme(i) { grassMat.color.set(THEMES[i].ground); fogTheme.set(THEMES[i].fog); }
 const fogTheme = new THREE.Color(0x1a2238);
+function applyTheme(i) {
+  const th = THEMES[i];
+  grassMat.color.set(th.ground);
+  grassMat.emissive.set(th.emissive); grassMat.emissiveIntensity = th.emI;
+  fogTheme.set(th.fog);
+  if (snow) snow.visible = th.snow;
+}
 // 空に浮かぶ他の惑星（装飾）
 for (let i = 0; i < 5; i++) {
   const r = 4 + Math.random() * 7;
@@ -360,6 +366,7 @@ function makeWeather(tex, count, opts) {
 }
 const petals = makeWeather(P.petalSprite(), 320, { size: 26, fall: 1.3, sway: 1.1 });
 const rain = makeWeather(P.rainSprite(), 600, { size: 34, fall: 7.0, sway: 0.05 });
+const snow = makeWeather(P.snowSprite(), 460, { size: 16, fall: 2.4, sway: 0.7 }); // 雪の星で自動表示
 let weather = 'none'; // 'none' | 'petals' | 'rain'
 
 // ============================================================ プレイヤー（3Dローポリ人型）
@@ -450,24 +457,41 @@ const warpBase = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.55, 0.3, 18), 
 warpBase.position.y = 0.15; warpGate.add(warpBase);
 warpGate.position.copy(surfPos(WARP_DIR, 0)); alignUp(warpGate, WARP_DIR);
 worldGroup.add(warpGate);
-let warping = false;
+let warping = false, warpCamDist = 0;     // warpCamDist>0 のあいだカメラ距離を上書き
+const tunnelEl = document.getElementById('tunnel');
+const easeIn = x => x * x, easeOut = x => 1 - (1 - x) * (1 - x);
+function tween(fn, ms, ease = x => x) {
+  return new Promise(res => {
+    const t0 = performance.now();
+    (function step() { const k = Math.min(1, (performance.now() - t0) / ms); fn(ease(k)); if (k < 1) requestAnimationFrame(step); else res(); })();
+  });
+}
 async function warpTo() {
-  if (warping) return; warping = true;
-  themeIndex = (themeIndex + 1) % THEMES.length;
-  planetMul *= 1.3;                        // 惑星ごとに難度上昇
-  Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.3);
-  await flash('#aef0ff', 0.95);
+  if (warping) return; warping = true; gameState = 'warp'; resetTouch();
+  const baseDist = camDist;
+  Audio.sfx('encounter'); shakeT = Math.max(shakeT, 0.3);
+  jumpV = JUMP_V * 1.5; grounded = false;             // 打ち上げ
+  // ① カメラを宇宙へ引く（惑星が小さくなる）
+  await tween(v => { warpCamDist = THREE.MathUtils.lerp(baseDist, 150, v); }, 650, easeIn);
+  // ② 曲速トンネル
+  tunnelEl.classList.add('on'); Audio.sfx('skill');
+  await new Promise(r => setTimeout(r, 250));
+  // ③ トンネル中に惑星を入れ替え
+  themeIndex = (themeIndex + 1) % THEMES.length; planetMul *= 1.3;
   applyTheme(themeIndex);
   for (const e of enemies) scene.remove(e.model.root); enemies.length = 0;
   bossRef = null; bossbarEl.style.display = 'none';
   for (const p of pickups) scene.remove(p.obj); pickups.length = 0;
   for (const pr of projectiles) scene.remove(pr.mesh); projectiles.length = 0;
   for (const a of aoes) scene.remove(a.grp); aoes.length = 0;
-  pDir.set(0, 1, 0); hero.hp = Math.min(hero.maxHp, hero.hp + 30);
-  wave = 0; startWave(1);
-  await flash('#aef0ff', 0.5);
+  pDir.set(0, 1, 0); hero.hp = Math.min(hero.maxHp, hero.hp + 30); jumpH = 0; jumpV = 0; grounded = true;
+  wave = 0; startWave(1); updateHUD();
+  await new Promise(r => setTimeout(r, 450));
+  tunnelEl.classList.remove('on');
+  // ④ 新しい惑星へ寄る
+  await tween(v => { warpCamDist = THREE.MathUtils.lerp(150, baseDist, v); }, 750, easeOut);
+  warpCamDist = 0; gameState = 'field'; warping = false;
   showArea(THEMES[themeIndex].name, THEMES[themeIndex].en);
-  updateHUD(); warping = false;
 }
 
 // ============================================================ 花・岩（3D）
@@ -1463,7 +1487,7 @@ function update(dt, t) {
   // --- カメラ（惑星の上を周回する三人称）---
   _foot.copy(pDir).multiplyScalar(PLANET_R + 1.4);
   _off.copy(_up).multiplyScalar(Math.sin(camPitch)).addScaledVector(_fwd, -Math.cos(camPitch));
-  camera.position.copy(_foot).addScaledVector(_off, camDist * aspectFit);
+  camera.position.copy(_foot).addScaledVector(_off, (warpCamDist > 0 ? warpCamDist : camDist) * aspectFit);
   camera.up.copy(_up);
   camera.lookAt(_foot);
   if (shakeT > 0) { const s = shakeT * 1.4; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; camera.position.z += (Math.random() - 0.5) * s; }
@@ -1485,9 +1509,13 @@ function update(dt, t) {
   mistUniforms.uTime.value = t;
   petals.material.uniforms.uTime.value = t;
   rain.material.uniforms.uTime.value = t;
+  snow.material.uniforms.uTime.value = t;
   // 天候はプレイヤーの真上から降らせる
-  petals.position.copy(player.position); rain.position.copy(player.position);
-  petals.quaternion.setFromUnitVectors(UPVEC, pDir); rain.quaternion.copy(petals.quaternion);
+  petals.position.copy(player.position); rain.position.copy(player.position); snow.position.copy(player.position);
+  petals.quaternion.setFromUnitVectors(UPVEC, pDir); rain.quaternion.copy(petals.quaternion); snow.quaternion.copy(petals.quaternion);
+  // 溶岩/異界の地面の発光を脈動させる
+  const th = THEMES[themeIndex];
+  if (th.emI > 0) grassMat.emissiveIntensity = th.emI * (0.78 + 0.22 * Math.sin(t * 2.5));
 
   // 太陽は惑星中心を照らす（歩くと昼/夜の境界を越えられる）
   sun.target.position.set(0, 0, 0);

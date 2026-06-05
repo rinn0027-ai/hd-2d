@@ -504,3 +504,14 @@ export function enemySprite(type = 'slime', size = 96) {
   g.drawImage(body, 0, 0);
   return finishSprite(c);
 }
+
+// ---- 雪片（白いソフトな点） ----
+export function snowSprite(size = 32) {
+  const c = makeCanvas(size), g = c.getContext('2d');
+  const grd = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.5, 'rgba(240,248,255,0.7)');
+  grd.addColorStop(1, 'rgba(220,235,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true; return tex;
+}

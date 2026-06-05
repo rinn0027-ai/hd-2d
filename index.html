@@ -173,6 +173,15 @@
     /* 画面フラッシュ/トランジション */
     #flash { position: fixed; inset: 0; z-index: 18; background: #fff; opacity: 0; pointer-events: none; transition: opacity .18s ease; }
 
+    /* ワープ飛行トンネル */
+    #tunnel { position: fixed; inset: -20%; z-index: 17; opacity: 0; pointer-events: none; transition: opacity .25s ease;
+      background: repeating-conic-gradient(from 0deg at 50% 50%,
+        rgba(180,220,255,0) 0deg, rgba(180,220,255,0) 1.1deg,
+        rgba(220,240,255,.6) 1.5deg, rgba(180,220,255,0) 2.0deg);
+      filter: blur(1px); }
+    #tunnel.on { opacity: 1; animation: warpzoom .55s ease-in infinite; }
+    @keyframes warpzoom { 0% { transform: scale(.35); } 100% { transform: scale(2.6); } }
+
     /* バトルUI */
     #battle { position: fixed; inset: 0; z-index: 13; display: none; pointer-events: none; }
     #battle .panel-box { position: absolute; background: linear-gradient(180deg, rgba(18,22,38,.92), rgba(10,12,22,.94));
@@ -306,6 +315,7 @@
   </div>
 
   <div id="flash"></div>
+  <div id="tunnel"></div>
   <div id="hurt"></div>
   <div id="levelup"><h2>LEVEL UP — 祝福を選べ</h2><div id="luOpts"></div></div>
   <div id="shop"><h2>🛒 行商人のみせ <span id="shopCoins"></span></h2><div id="shopItems"></div><div id="shopClose" class="luCard">とじる</div></div>
