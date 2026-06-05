@@ -39,6 +39,15 @@ addEventListener('touchend', e => {
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x1a2238, 0.012);
 
+// 黒い輪郭線（反転ハル: 各メッシュの裏面を少し膨らませて描く。肢体アニメに追従）
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x0a0a12, side: THREE.BackSide });
+const COL_BLACK = new THREE.Color(0, 0, 0);
+function addOutline(group, k = 1.08) {
+  const meshes = [];
+  group.traverse(o => { if (o.isMesh && !o.userData.outline) meshes.push(o); });
+  for (const o of meshes) { const ol = new THREE.Mesh(o.geometry, OUTLINE_MAT); ol.scale.setScalar(k); ol.castShadow = false; ol.receiveShadow = false; ol.userData.outline = true; o.add(ol); }
+}
+
 // ============================================================ camera（低FOVで箱庭パース）
 const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 400);
 let camPitch = 0.92, camDist = 26;
@@ -157,6 +166,25 @@ const planetGeo = new THREE.SphereGeometry(PLANET_R, 96, 64);
 const planet = new THREE.Mesh(planetGeo, grassMat);
 planet.receiveShadow = true; planet.castShadow = true;
 scene.add(planet);
+
+// ============================================================ 惑星テーマ（多惑星ワープ）
+const THEMES = [
+  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238 },
+  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xbfe0ff, fog: 0x2a3a52 },
+  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff7a4a, fog: 0x3a1810 },
+  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840 },
+];
+let themeIndex = 0;
+function applyTheme(i) { grassMat.color.set(THEMES[i].ground); fogTheme.set(THEMES[i].fog); }
+const fogTheme = new THREE.Color(0x1a2238);
+// 空に浮かぶ他の惑星（装飾）
+for (let i = 0; i < 5; i++) {
+  const r = 4 + Math.random() * 7;
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), new THREE.MeshBasicMaterial({ color: THEMES[(i + 1) % THEMES.length].ground === 0xffffff ? 0x6fae5e : THEMES[(i + 1) % THEMES.length].ground, fog: false }));
+  const d = randDirSeeded(i); m.position.copy(d).multiplyScalar(150 + Math.random() * 80);
+  scene.add(m);
+}
+function randDirSeeded(i) { const a = i * 2.4, b = i * 1.7; return new THREE.Vector3(Math.cos(a) * Math.cos(b), Math.sin(b), Math.sin(a) * Math.cos(b)); }
 
 // 大気シェル（"薄霧"トグルで表示）
 const mistUniforms = { uTime: { value: 0 }, uColor: { value: new THREE.Color(0xdfe8f5) }, uStrength: { value: 0.55 } };
@@ -340,6 +368,7 @@ const player = playerModel.root;
 player.scale.setScalar(1.12);            // 少し大きく
 // 主役を自発光させて、どんな光でも視認できるように
 player.traverse(o => { if (o.isMesh && o.material && o.material.emissive) { o.material.emissive.copy(o.material.color).multiplyScalar(0.6); o.material.emissiveIntensity = 0.28; } });
+addOutline(player, 1.1);                  // 黒い輪郭線
 scene.add(player);
 // 足元の光リング（位置をいつも把握できる目印）
 const markerMat = new THREE.MeshBasicMaterial({ color: 0x7fe0ff, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false });
@@ -389,6 +418,7 @@ const npcs = [];
 function addNPC(dir, paletteName, name, lines) {
   const model = M.makeHumanoid(NPC_COLORS[paletteName]);
   placeOnSurface(model.root, dir);
+  addOutline(model.root, 1.08);
   scene.add(model.root);
   const npc = { model, name, lines, dir: dir.clone().normalize(), wanderT: Math.random() * 5 };
   npcs.push(npc); addObstacleDir(dir, 0.045);
@@ -410,6 +440,34 @@ function addChest(dir, reward) {
 }
 addChest(new THREE.Vector3(-0.6, -0.3, -0.6).normalize(), { potions: 2 });
 addChest(new THREE.Vector3(0.7, -0.5, 0.4).normalize(), { potions: 1 });
+
+// ============================================================ ワープゲート（次の惑星へ）
+const WARP_DIR = new THREE.Vector3(0.85, 0.15, -0.3).normalize();
+const warpGate = new THREE.Group();
+const warpTorus = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.22, 10, 26), new THREE.MeshStandardMaterial({ color: 0x9fe8ff, emissive: 0x33b0ff, emissiveIntensity: 1.5, roughness: 0.3 }));
+warpTorus.position.y = 1.9; warpGate.add(warpTorus);
+const warpBase = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.55, 0.3, 18), new THREE.MeshStandardMaterial({ color: 0x2a3550, roughness: 0.7 }));
+warpBase.position.y = 0.15; warpGate.add(warpBase);
+warpGate.position.copy(surfPos(WARP_DIR, 0)); alignUp(warpGate, WARP_DIR);
+worldGroup.add(warpGate);
+let warping = false;
+async function warpTo() {
+  if (warping) return; warping = true;
+  themeIndex = (themeIndex + 1) % THEMES.length;
+  Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.3);
+  await flash('#aef0ff', 0.95);
+  applyTheme(themeIndex);
+  for (const e of enemies) scene.remove(e.model.root); enemies.length = 0;
+  bossRef = null; bossbarEl.style.display = 'none';
+  for (const p of pickups) scene.remove(p.obj); pickups.length = 0;
+  for (const pr of projectiles) scene.remove(pr.mesh); projectiles.length = 0;
+  for (const a of aoes) scene.remove(a.grp); aoes.length = 0;
+  pDir.set(0, 1, 0); hero.hp = Math.min(hero.maxHp, hero.hp + 30);
+  wave = 0; startWave(1);
+  await flash('#aef0ff', 0.5);
+  showArea(THEMES[themeIndex].name, THEMES[themeIndex].en);
+  updateHUD(); warping = false;
+}
 
 // ============================================================ 花・岩（3D）
 const flowerColors = [0xffd23a, 0xff7a9c, 0xc08aff, 0xff9a4a, 0xffffff];
@@ -490,7 +548,7 @@ const dlgText = document.getElementById('dlgText');
 let dlg = null; // { lines, idx, full, shown, done }
 
 function startDialogue(name, lines) {
-  gameState = 'dialogue';
+  gameState = 'dialogue'; resetTouch();
   dlg = { name, lines, idx: 0 };
   dlgEl.style.display = 'block';
   showDlgLine();
@@ -566,16 +624,22 @@ function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1) {
   const e = M.makeEnemy(def.model);
   e.root.scale.setScalar(def.scale * childScale);
   if (def.tint) e.root.traverse(o => { if (o.isMesh && o.material && o.material.color) o.material.color.set(def.tint); });
+  const mats = collectMats(e.root);
+  for (const m of mats) { m.emissive.copy(m.color).multiplyScalar(0.45); m.emissiveIntensity = 0.7; m.userData.be = m.emissive.clone(); } // 夜でも見える自発光
+  addOutline(e.root, 1.07);
   scene.add(e.root);
-  const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp: def.hp * hpScale, maxHp: def.hp * hpScale, alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats: collectMats(e.root), childScale };
+  const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp: def.hp * hpScale, maxHp: def.hp * hpScale, alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats, childScale };
   enemies.push(en); return en;
 }
 function spawnBoss(n) {
   const e = M.makeBoss();
   const hp = BOSS_DEF.hp + (n - 5) * 60;
   e.root.scale.setScalar(BOSS_DEF.scale);
+  const mats = collectMats(e.root);
+  for (const m of mats) { m.userData.be = m.emissive.clone(); }
+  addOutline(e.root, 1.05);
   scene.add(e.root);
-  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, dir: freeDir().clone(), hp, maxHp: hp, alive: true, atkCD: 2, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats: collectMats(e.root) };
+  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, dir: freeDir().clone(), hp, maxHp: hp, alive: true, atkCD: 2, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats };
   enemies.push(bossRef);
   Audio.sfx('encounter');
   document.getElementById('bossName').textContent = '◆ スライム王 KING SLIME ◆';
@@ -827,7 +891,7 @@ const UPGRADES = [
 const levelupEl = document.getElementById('levelup'), luOptsEl = document.getElementById('luOpts');
 let luChoices = [];
 function openLevelUp() {
-  gameState = 'levelup';
+  gameState = 'levelup'; if (typeof resetTouch === 'function') resetTouch();
   const pool = UPGRADES.slice(); luChoices = [];
   for (let i = 0; i < 3 && pool.length; i++) luChoices.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
   luOptsEl.innerHTML = '';
@@ -892,10 +956,12 @@ function findInteract() {
   let best = null, bestDot = Math.cos(0.18); // 角度しきい値
   for (const n of npcs) { const dt = pDir.dot(n.dir); if (dt > bestDot) { bestDot = dt; best = { type: 'npc', ref: n }; } }
   for (const c of chests) { if (c.opened) continue; const dt = pDir.dot(c.dir); if (dt > bestDot) { bestDot = dt; best = { type: 'chest', ref: c }; } }
+  { const dt = pDir.dot(WARP_DIR); if (dt > bestDot) { bestDot = dt; best = { type: 'warp' }; } }
   return best;
 }
 function interactTarget() {
   if (nearTarget.type === 'npc') { Audio.sfx('confirm'); startDialogue(nearTarget.ref.name, nearTarget.ref.lines); }
+  else if (nearTarget.type === 'warp') { warpTo(); }
   else if (nearTarget.type === 'chest') {
     const c = nearTarget.ref; c.opened = true; c.lidPivot.rotation.x = -1.2;
     Audio.sfx('chest');
@@ -1029,13 +1095,15 @@ addEventListener('touchmove', e => {
   e.preventDefault();
 }, { passive: false });
 
+function resetTouch() { touchMap.clear(); joyId = null; camId = null; pinchDist = null; endJoy(); }
 function onTouchEnd(e) {
   for (const t of e.changedTouches) {
     touchMap.delete(t.identifier);
     if (t.identifier === joyId) { joyId = null; endJoy(); }
     if (t.identifier === camId) camId = null;
   }
-  assignRoles();   // 残った指を再割り当て（ピンチ→1本に戻ったら回転/スティックへ）
+  if (e.touches.length === 0) resetTouch();   // 指が全部離れたら状態を完全リセット（取り残し防止）
+  else assignRoles();
 }
 addEventListener('touchend', onTouchEnd);
 addEventListener('touchcancel', onTouchEnd);
@@ -1099,7 +1167,7 @@ function applyTimeOfDay(t) {
   const k = THREE.MathUtils.clamp((t - a.t) / (b.t - a.t), 0, 1);
   const lerpC = (ca, cb) => cA.set(ca).lerp(cB.set(cb), k);
   scene.background = lerpC(a.sky, b.sky).clone();
-  scene.fog.color.copy(lerpC(a.fog, b.fog));
+  scene.fog.color.copy(lerpC(a.fog, b.fog)).lerp(fogTheme, 0.45);
   sun.color.copy(lerpC(a.sun, b.sun));
   sun.intensity = THREE.MathUtils.lerp(a.sunI, b.sunI, k);
   ambient.intensity = THREE.MathUtils.lerp(a.amb, b.amb, k);
@@ -1162,7 +1230,7 @@ let facingFlip = false, lastBack = false, walkAnim = 0, stepTimer = 0;
 // アクションプロンプト（Aボタンは攻撃/交互作用の文脈表示）
 const hintEl = document.getElementById('hint');
 function updatePrompt() {
-  const verb = gameState === 'dialogue' ? '送る' : (nearTarget ? (nearTarget.type === 'chest' ? '調べる' : '話す') : '攻撃');
+  const verb = gameState === 'dialogue' ? '送る' : (nearTarget ? (nearTarget.type === 'chest' ? '調べる' : nearTarget.type === 'warp' ? 'ワープ' : '話す') : '攻撃');
   if (isTouch) {
     btnA.classList.add('show');
     btnA.textContent = gameState === 'dialogue' ? '▼' : verb;
@@ -1232,8 +1300,8 @@ function combatUpdate(dt, t) {
   }
   // 敵の挙動
   for (const e of enemies) {
-    // 発光フラッシュ
-    if (e.hitFlash > 0) { e.hitFlash -= dt; const f = Math.max(0, e.hitFlash / 0.18); for (const m of e.mats) m.emissive.setScalar(f * 0.9); }
+    // 発光フラッシュ（ベース自発光＋白フラッシュ）
+    if (e.hitFlash > 0) { e.hitFlash -= dt; const f = Math.max(0, e.hitFlash / 0.18); for (const m of e.mats) m.emissive.copy(m.userData.be || COL_BLACK).addScalar(f * 0.9); }
     if (!e.alive) {
       if (e.dead > 0) { e.dead -= dt; e.model.root.scale.setScalar(Math.max(0.001, e.def.scale * e.dead * 2)); if (e.dead <= 0) e.model.root.visible = false; }
       continue;
@@ -1365,6 +1433,7 @@ function update(dt, t) {
 
   // --- NPC（待機モーション）---
   for (const n of npcs) { n.model.root.position.copy(surfPos(n.dir, Math.sin(t * 1.8 + n.wanderT) * 0.04)); n.model.update(dt, false); }
+  warpTorus.rotation.z += dt * 1.6;       // ワープゲート回転
   updateEnemyBars();
   nearTarget = findInteract();
   updatePrompt();
