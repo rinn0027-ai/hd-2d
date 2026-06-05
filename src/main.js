@@ -532,46 +532,59 @@ function flash(color = '#fff', peak = 0.9) {
 // 昼夜でBGMの雰囲気を切替
 function dayNightMood() { return (Math.abs(timeOfDay - 0.5) * 2 > 0.55) ? 'night' : 'day'; }
 
-// ============================================================ 即時戦闘（フィールド上）
+// ============================================================ 即時戦闘（ウェーブ制）
 const ENEMY_DEF = {
-  slime:    { hp: 18, atk: 7,  exp: 8,  scale: 1.3, speed: 1.9, hover: 0,   atkRange: 2.2, aggro: 9 },
-  mushroom: { hp: 32, atk: 12, exp: 16, scale: 1.4, speed: 1.4, hover: 0,   atkRange: 2.5, aggro: 8 },
-  bat:      { hp: 13, atk: 8,  exp: 12, scale: 1.2, speed: 2.9, hover: 1.4, atkRange: 2.1, aggro: 12 },
+  slime:    { model: 'slime',    hp: 16, atk: 7,  exp: 8,  scale: 1.3, speed: 1.9, hover: 0,   atkRange: 2.2, aggro: 10, behavior: 'chase',  score: 10 },
+  mushroom: { model: 'mushroom', hp: 30, atk: 12, exp: 16, scale: 1.4, speed: 1.3, hover: 0,   atkRange: 2.5, aggro: 9,  behavior: 'chase',  score: 15 },
+  bat:      { model: 'bat',      hp: 12, atk: 8,  exp: 12, scale: 1.2, speed: 3.0, hover: 1.4, atkRange: 2.0, aggro: 13, behavior: 'charge', score: 12 },
+  caster:   { model: 'mushroom', hp: 22, atk: 9,  exp: 18, scale: 1.4, speed: 1.0, hover: 0,   atkRange: 9.5, aggro: 16, behavior: 'caster', score: 20, tint: 0x8a4ad0 },
+  splitter: { model: 'slime',    hp: 28, atk: 8,  exp: 14, scale: 1.7, speed: 1.6, hover: 0,   atkRange: 2.4, aggro: 10, behavior: 'split',  score: 16, tint: 0x3a86c0 },
 };
-const ENEMY_KINDS = Object.keys(ENEMY_DEF);
-const BOSS_DEF = { hp: 220, atk: 20, exp: 120, scale: 3.2, speed: 1.5, hover: 0, atkRange: 4.2, aggro: 999 };
+const BOSS_DEF = { hp: 220, atk: 20, exp: 120, scale: 3.2, speed: 1.6, hover: 0, atkRange: 4.4, aggro: 999, behavior: 'boss', score: 300 };
 const enemies = [];
-const MAX_ENEMIES = 7;
-let killCount = 0, bossRef = null;
+let bossRef = null;
+let wave = 0, waveBreak = 0, score = 0, coins = 0;
+let hitStop = 0, slowMo = 0;
 
 function collectMats(root) { const a = []; root.traverse(o => { if (o.isMesh && o.material && o.material.emissive) a.push(o.material); }); return a; }
-
-function spawnEnemy(kind, dir) {
-  const def = ENEMY_DEF[kind];
-  const e = M.makeEnemy(kind);
-  e.root.scale.setScalar(def.scale);
-  scene.add(e.root);
-  enemies.push({ model: e, kind, def, dir: dir.clone().normalize(), hp: def.hp, maxHp: def.hp, alive: true, atkCD: Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, mats: collectMats(e.root) });
+function freeDir(awayFromPlayer = true) {
+  let d = randDir();
+  for (let k = 0; k < 24; k++) { d = randDir(); if ((!awayFromPlayer || pDir.dot(d) < 0.5) && !nearObstacle(d, 0.05)) break; }
+  return d;
 }
-function spawnBoss() {
+function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1) {
+  const def = ENEMY_DEF[key];
+  const e = M.makeEnemy(def.model);
+  e.root.scale.setScalar(def.scale * childScale);
+  if (def.tint) e.root.traverse(o => { if (o.isMesh && o.material && o.material.color) o.material.color.set(def.tint); });
+  scene.add(e.root);
+  const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp: def.hp * hpScale, maxHp: def.hp * hpScale, alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats: collectMats(e.root), childScale };
+  enemies.push(en); return en;
+}
+function spawnBoss(n) {
   const e = M.makeBoss();
+  const hp = BOSS_DEF.hp + (n - 5) * 60;
   e.root.scale.setScalar(BOSS_DEF.scale);
   scene.add(e.root);
-  let d = randDir(); for (let k = 0; k < 20; k++) { d = randDir(); if (pDir.dot(d) < 0.3) break; }
-  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, dir: d.clone().normalize(), hp: BOSS_DEF.hp, maxHp: BOSS_DEF.hp, alive: true, atkCD: 2, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats: collectMats(e.root) };
+  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, dir: freeDir().clone(), hp, maxHp: hp, alive: true, atkCD: 2, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats: collectMats(e.root) };
   enemies.push(bossRef);
   Audio.sfx('encounter');
   document.getElementById('bossName').textContent = '◆ スライム王 KING SLIME ◆';
   bossbarEl.style.display = 'block';
-  showArea('ボスが あらわれた！', 'BOSS');
+  showArea('ボスが あらわれた！', 'BOSS WAVE ' + n);
 }
-function spawnWave() {
-  let guard = 0;
-  while (enemies.filter(e => e.alive && !e.isBoss).length < MAX_ENEMIES && guard++ < 30) {
-    let d = randDir();
-    for (let k = 0; k < 20; k++) { d = randDir(); if (pDir.dot(d) < 0.55 && !nearObstacle(d, 0.05)) break; }
-    spawnEnemy(ENEMY_KINDS[Math.floor(Math.random() * ENEMY_KINDS.length)], d);
-  }
+function startWave(n) {
+  wave = n;
+  if (n % 5 === 0) { spawnBoss(n); updateHUD(); return; }
+  const count = Math.min(11, 3 + Math.floor(n * 0.9));
+  const hpScale = 1 + (n - 1) * 0.16;
+  const pool = ['slime', 'bat'];
+  if (n >= 2) pool.push('mushroom');
+  if (n >= 3) pool.push('splitter');
+  if (n >= 4) pool.push('caster', 'bat');
+  for (let i = 0; i < count; i++) spawnEnemyDef(pool[Math.floor(Math.random() * pool.length)], freeDir(), hpScale);
+  showArea('WAVE ' + n, count + ' 体');
+  updateHUD();
 }
 const bossbarEl = document.getElementById('bossbar'), bossHpEl = document.getElementById('bossHp');
 
@@ -595,6 +608,86 @@ function updateEffects(dt) {
   }
 }
 
+// ============================================================ 掉落物（コイン/ハート/ジェム）
+const pickups = [];
+function makePickup(type) {
+  if (type === 'coin') return new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.09, 12), new THREE.MeshStandardMaterial({ color: 0xffd23a, metalness: 0.7, roughness: 0.3, emissive: 0x553300, emissiveIntensity: 0.5 }));
+  if (type === 'heart') {
+    const g = new THREE.Group(), mt = new THREE.MeshStandardMaterial({ color: 0xff4d6d, emissive: 0x551020, emissiveIntensity: 0.5, roughness: 0.5 });
+    const a = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), mt); a.position.set(-0.11, 0.08, 0);
+    const b = a.clone(); b.position.x = 0.11;
+    const c = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.34, 8), mt); c.rotation.x = Math.PI; c.position.y = -0.16;
+    g.add(a, b, c); return g;
+  }
+  return new THREE.Mesh(new THREE.OctahedronGeometry(0.26, 0), new THREE.MeshStandardMaterial({ color: 0x6ad0ff, emissive: 0x113a55, emissiveIntensity: 0.6, roughness: 0.3 }));
+}
+function dropPickup(type, dir) {
+  const obj = new THREE.Group(); obj.add(makePickup(type));
+  obj.position.copy(surfPos(dir, 0.8)); alignUp(obj, dir);
+  scene.add(obj);
+  pickups.push({ obj, type, dir: dir.clone().normalize(), t: Math.random() * 9, life: 16 });
+}
+function collectPickup(type) {
+  if (type === 'coin') { coins++; score += 5; Audio.sfx('cursor'); }
+  else if (type === 'heart') { hero.hp = Math.min(hero.maxHp, hero.hp + 18); Audio.sfx('heal'); showDmg(player.position.clone().addScaledVector(_up, 2.6), 18, 'heal'); }
+  else { gainExp(6); score += 3; Audio.sfx('cursor'); }
+  updateHUD();
+}
+function updatePickups(dt) {
+  for (let i = pickups.length - 1; i >= 0; i--) {
+    const p = pickups[i]; p.life -= dt; p.t += dt;
+    const d = THREE.MathUtils.clamp(pDir.dot(p.dir), -1, 1);
+    const ang = Math.acos(d) * PLANET_R;
+    if (ang < 3.0) { _axis.crossVectors(p.dir, pDir).normalize(); p.dir.applyAxisAngle(_axis, Math.min(9 * dt / PLANET_R, ang / PLANET_R)).normalize(); }
+    p.obj.position.copy(surfPos(p.dir, 0.85 + Math.sin(p.t * 3) * 0.12));
+    alignUp(p.obj, p.dir); p.obj.children[0].rotation.y += dt * 3;
+    if (ang < 1.0 && p.life > 0) { collectPickup(p.type); scene.remove(p.obj); pickups.splice(i, 1); }
+    else if (p.life <= 0) { scene.remove(p.obj); pickups.splice(i, 1); }
+  }
+}
+
+// ============================================================ 敵の弾（caster）
+const projectiles = [];
+function spawnProjectile(fromDir, toDir, dmg) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.34, 10, 8), new THREE.MeshStandardMaterial({ color: 0xc78aff, emissive: 0x7a2aff, emissiveIntensity: 1.3, roughness: 0.4 }));
+  scene.add(m);
+  const axis = new THREE.Vector3().crossVectors(fromDir, toDir);
+  if (axis.lengthSq() < 1e-6) axis.crossVectors(fromDir, XAXIS);
+  axis.normalize();
+  projectiles.push({ mesh: m, dir: fromDir.clone(), axis, life: 4.5, speed: 6, dmg });
+}
+function updateProjectiles(dt) {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i]; p.life -= dt;
+    p.dir.applyAxisAngle(p.axis, p.speed * dt / PLANET_R).normalize();
+    p.mesh.position.copy(surfPos(p.dir, 1.5)); p.mesh.rotation.y += dt * 6;
+    const ang = Math.acos(THREE.MathUtils.clamp(pDir.dot(p.dir), -1, 1)) * PLANET_R;
+    if (ang < 1.4) { hurtPlayer(p.dmg, p.dir); spawnImpact(p.mesh.position.clone(), 0xc78aff, 6); scene.remove(p.mesh); projectiles.splice(i, 1); }
+    else if (p.life <= 0) { scene.remove(p.mesh); projectiles.splice(i, 1); }
+  }
+}
+
+// ============================================================ 敵HPバー（頭上, DOMプール）
+const ebarWrap = document.getElementById('ebars'), ebarPool = [], _ev = new THREE.Vector3();
+function updateEnemyBars() {
+  let idx = 0;
+  for (const e of enemies) {
+    if (!e.alive || e.isBoss || e.hp >= e.maxHp) continue;
+    let bar = ebarPool[idx];
+    if (!bar) { const d = document.createElement('div'); d.className = 'ebar'; const f = document.createElement('i'); d.appendChild(f); ebarWrap.appendChild(d); bar = { d, f }; ebarPool[idx] = bar; }
+    _ev.copy(e.model.root.position).addScaledVector(e.dir, e.def.scale * (e.def.model === 'bat' ? 2.2 : 1.8) + 0.4).project(camera);
+    if (_ev.z > 1 || _ev.z < -1) { bar.d.style.display = 'none'; }
+    else {
+      bar.d.style.display = 'block';
+      bar.d.style.left = (_ev.x * 0.5 + 0.5) * innerWidth + 'px';
+      bar.d.style.top = (-_ev.y * 0.5 + 0.5) * innerHeight + 'px';
+      bar.f.style.width = Math.max(0, e.hp / e.maxHp * 100) + '%';
+    }
+    idx++;
+  }
+  for (let i = idx; i < ebarPool.length; i++) ebarPool[i].d.style.display = 'none';
+}
+
 // 浮遊ダメージ表示
 function showDmg(worldPos, val, cls = '') {
   const v = worldPos.clone().project(camera);
@@ -609,11 +702,15 @@ function showDmg(worldPos, val, cls = '') {
 
 // HUD
 const hudHp = document.getElementById('hudHp'), hudHpTxt = document.getElementById('hudHpTxt'), hudLv = document.getElementById('hudLv'), hudExp = document.getElementById('hudExp');
+const hudWave = document.getElementById('hudWave'), hudScore = document.getElementById('hudScore'), hudCoins = document.getElementById('hudCoins');
 function updateHUD() {
   hudHp.style.width = Math.max(0, hero.hp / hero.maxHp * 100) + '%';
   hudHpTxt.textContent = `HP ${Math.max(0, Math.ceil(hero.hp))}/${hero.maxHp}`;
   hudLv.textContent = 'Lv ' + hero.level;
   hudExp.textContent = `EXP ${hero.exp}/${expToNext(hero.level)}`;
+  hudWave.textContent = 'WAVE ' + wave;
+  hudScore.textContent = 'SCORE ' + score;
+  hudCoins.textContent = '◆ ' + coins;
 }
 function gainExp(n) {
   hero.exp += n;
@@ -678,17 +775,30 @@ function respawnPlayer() {
   showArea('やられた… 復活', 'RESPAWN');
 }
 function killEnemy(e) {
+  if (!e.alive) return;
   e.alive = false; e.dead = 0.5; gainExp(e.def.exp);
+  score += e.def.score || 10;
   spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.0), 0xffd27a, 10);
+  // 掉落
+  dropPickup('coin', e.dir);
+  if (Math.random() < 0.26) dropPickup('heart', e.dir);
+  if (Math.random() < 0.5) dropPickup('gem', e.dir);
   if (e.isBoss) {
-    bossRef = null; bossbarEl.style.display = 'none'; killCount = 0;
-    hero.hp = hero.maxHp; updateHUD();
-    Audio.sfx('victory'); showArea('スライム王を たおした！', 'BOSS DEFEATED');
+    bossRef = null; bossbarEl.style.display = 'none'; slowMo = 1.0;
+    for (let i = 0; i < 5; i++) dropPickup('coin', randDir().lerp(e.dir, 0.5).normalize());
+    hero.hp = hero.maxHp; Audio.sfx('victory'); showArea('スライム王を たおした！', 'BOSS DEFEATED');
   } else {
     Audio.sfx('chest');
-    killCount++;
-    if (killCount >= 8 && !bossRef) spawnBoss();
+    // 分裂
+    if (e.def.behavior === 'split' && !e.isChild) {
+      for (let i = 0; i < 2; i++) {
+        _axis.crossVectors(e.dir, randDir()).normalize();
+        const cd = e.dir.clone().applyAxisAngle(_axis, 0.08).normalize();
+        const c = spawnEnemyDef('slime', cd, 0.5, 0.75); c.isChild = true;
+      }
+    }
   }
+  updateHUD();
 }
 
 // ============================================================ 交互作用（最寄りのNPC/宝箱）
@@ -1026,6 +1136,7 @@ function combatUpdate(dt, t) {
       if (comboHeavy) dmg = Math.floor(dmg * 1.8);
       const crit = Math.random() < 0.2; const tot = crit ? dmg * 2 : dmg;
       e.hp -= tot; e.hitFlash = 0.18;
+      if (crit || comboHeavy) hitStop = Math.max(hitStop, 0.05); // 顿帧
       showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3.2 : 1.8), tot, crit ? 'crit' : '');
       spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 2.2 : 1.2), 0xfff2c0, crit ? 8 : 5);
       Audio.sfx('hit');
@@ -1041,31 +1152,41 @@ function combatUpdate(dt, t) {
       if (e.dead > 0) { e.dead -= dt; e.model.root.scale.setScalar(Math.max(0.001, e.def.scale * e.dead * 2)); if (e.dead <= 0) e.model.root.visible = false; }
       continue;
     }
-    if (e.atkCD > 0) e.atkCD -= dt; e.bobT += dt;
+    if (e.atkCD > 0) e.atkCD -= dt; if (e.chargeT > 0) e.chargeT -= dt; e.bobT += dt;
     const d = THREE.MathUtils.clamp(pDir.dot(e.dir), -1, 1);
     const angDist = Math.acos(d) * PLANET_R;
-    if (angDist < e.def.aggro) {                          // 追尾
-      if (angDist > e.def.atkRange) {
+    const bh = e.def.behavior;
+    if (angDist < e.def.aggro) {
+      if (bh === 'caster') {                              // 詠唱: 距離を取りつつ弾を撃つ
+        const want = e.def.atkRange * 0.55;
+        const move = (angDist < want ? -1 : 0.6) * e.def.speed * dt / PLANET_R; // 近いと後退
+        _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, move).normalize();
+        if (e.atkCD <= 0) { e.atkCD = 2.0; spawnProjectile(e.dir.clone(), pDir.clone(), e.def.atk); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.4), 0xc78aff, 4); }
+      } else if (angDist > e.def.atkRange) {              // 追尾（突進敵は接近時バースト）
+        if (bh === 'charge' && e.atkCD <= 0 && angDist < e.def.aggro * 0.7) { e.chargeT = 0.5; e.atkCD = 2.4; }
+        const sp = e.def.speed * (e.chargeT > 0 ? 2.6 : 1);
         _axis.crossVectors(e.dir, pDir).normalize();
-        e.dir.applyAxisAngle(_axis, Math.min(e.def.speed * dt / PLANET_R, angDist / PLANET_R)).normalize();
-      } else if (e.atkCD <= 0) {
-        if (e.isBoss) { e.atkCD = 2.2; e.slamT = 0.5; shakeT = Math.max(shakeT, 0.4); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 0.5), 0xff7e6a, 16); hurtPlayer(e.def.atk, e.dir); }
-        else { e.atkCD = 1.3; hurtPlayer(e.def.atk, e.dir); }
+        e.dir.applyAxisAngle(_axis, Math.min(sp * dt / PLANET_R, angDist / PLANET_R)).normalize();
+      } else if (e.atkCD <= 0) {                          // 近接攻撃
+        if (e.isBoss) { e.atkCD = 2.2; e.slamT = 0.5; shakeT = Math.max(shakeT, 0.4); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 0.5), 0xff7e6a, 16); }
+        else e.atkCD = 1.3;
+        hurtPlayer(e.def.atk, e.dir);
       }
-    } else if (!e.isBoss) {                                // 徘徊（ボスは常に追尾）
+    } else if (!e.isBoss) {                                // 徘徊
       if (!e.wander || e.wanderCD <= 0) { e.wander = randDir(); e.wanderCD = 2 + Math.random() * 2; }
       e.wanderCD -= dt;
       _axis.crossVectors(e.dir, e.wander).normalize();
       e.dir.applyAxisAngle(_axis, e.def.speed * 0.4 * dt / PLANET_R).normalize();
     }
     let bob = (e.def.hover ? 0.3 : 0.12) * Math.sin(e.bobT * 2.2);
-    if (e.isBoss && e.slamT > 0) { e.slamT -= dt; bob += Math.sin((1 - e.slamT / 0.5) * Math.PI) * 1.2; } // 叩きつけ
+    if (e.isBoss && e.slamT > 0) { e.slamT -= dt; bob += Math.sin((1 - e.slamT / 0.5) * Math.PI) * 1.2; }
     e.model.root.position.copy(surfPos(e.dir, e.def.hover + bob));
     _md.copy(pDir).addScaledVector(e.dir, -d);
     orientStanding(e.model.root, e.dir, _md.lengthSq() > 1e-6 ? _md : heading);
   }
-  if (bossRef) { bossHpEl.style.width = Math.max(0, bossRef.hp / bossRef.maxHp * 100) + '%'; }
-  if (enemies.filter(e => e.alive && !e.isBoss).length < 3 && !bossRef) spawnWave();
+  // 死亡済みを配列から除去
+  for (let i = enemies.length - 1; i >= 0; i--) { const e = enemies[i]; if (!e.alive && e.dead <= 0) { scene.remove(e.model.root); enemies.splice(i, 1); } }
+  if (bossRef) bossHpEl.style.width = Math.max(0, bossRef.hp / bossRef.maxHp * 100) + '%';
 }
 
 function update(dt, t) {
@@ -1110,6 +1231,11 @@ function update(dt, t) {
       if (dashT <= 0) { stepTimer -= dt; if (stepTimer <= 0) { Audio.sfx('step'); stepTimer = dash ? 0.22 : 0.34; } }
     }
     combatUpdate(dt, t);
+    updateProjectiles(dt);
+    updatePickups(dt);
+    // ウェーブ進行：全滅したら少し待って次のウェーブ
+    if (waveBreak > 0) { waveBreak -= dt; if (waveBreak <= 0) startWave(wave + 1); }
+    else if (enemies.length === 0) { waveBreak = 2.4; score += 50; showArea('WAVE ' + wave + ' クリア！', '+50'); updateHUD(); }
   } else {
     camRot = 0;
   }
@@ -1144,6 +1270,7 @@ function update(dt, t) {
 
   // --- NPC（待機モーション）---
   for (const n of npcs) { n.model.root.position.copy(surfPos(n.dir, Math.sin(t * 1.8 + n.wanderT) * 0.04)); n.model.update(dt, false); }
+  updateEnemyBars();
   nearTarget = findInteract();
   updatePrompt();
 
@@ -1169,10 +1296,13 @@ function update(dt, t) {
 
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const real = Math.min(clock.getDelta(), 0.05);
+  if (hitStop > 0) hitStop -= real; if (slowMo > 0) slowMo -= real;
+  const factor = hitStop > 0 ? 0.05 : (slowMo > 0 ? 0.4 : 1); // 顿帧 / 慢动作
+  const dt = real * factor;
   const t = clock.elapsedTime;
   update(dt, t);
-  updateDialogue(dt);
+  updateDialogue(real);
   gradePass.uniforms.uTime.value = (t * 9) % 100 + 1; // グレインは常時更新
   composer.render();
 }
@@ -1181,8 +1311,8 @@ function animate() {
 setTimeout(() => showArea('まるい大地', 'TINY PLANET'), 600);
 
 // 起動
+startWave(1);
 updateHUD();
-spawnWave();
 applyTimeOfDay(timeOfDay);
 animate();
 const loading = document.getElementById('loading');
