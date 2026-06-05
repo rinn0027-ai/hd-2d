@@ -138,6 +138,12 @@
       background: rgba(0,0,0,.5); border: 1px solid rgba(0,0,0,.5); border-radius: 3px; overflow: hidden; display: none; }
     .ebar > i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg,#ff5a5a,#ffb36a); }
 
+    /* ナビ矢印（ワープ/ボスの方向） */
+    #navArrows { position: fixed; inset: 0; z-index: 9; pointer-events: none; }
+    .navArrow { position: absolute; font-size: 26px; transform: translate(-50%, -50%); display: none;
+      text-shadow: 0 0 8px rgba(0,0,0,.9); will-change: left, top, transform; }
+    #warpArrow { color: #7fe0ff; } #bossArrow { color: #ff6a6a; }
+
     /* レベルアップの祝福選択 / 商店 */
     #levelup, #shop { position: fixed; inset: 0; z-index: 16; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
       background: rgba(6,8,16,.62); backdrop-filter: blur(4px); font-family: ui-monospace, monospace; }
@@ -281,6 +287,10 @@
     <div class="lv" style="margin-top:6px"><span id="hudWave" style="color:#ffd27a"></span> &nbsp; <span id="hudScore"></span> &nbsp; <span id="hudCoins" style="color:#ffd23a"></span></div>
   </div>
   <div id="ebars"></div>
+  <div id="navArrows">
+    <div id="warpArrow" class="navArrow">➤</div>
+    <div id="bossArrow" class="navArrow">➤</div>
+  </div>
 
   <div id="areaToast" class="gfont"></div>
 

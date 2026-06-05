@@ -71,6 +71,9 @@ const SONGS = {
   day:   { tempo: 300, scale: [262, 330, 392, 523, 392, 330], bass: [131, 131, 196, 196], wave: 'triangle' },
   night: { tempo: 420, scale: [220, 262, 330, 262, 196, 262], bass: [110, 110, 147, 98], wave: 'sine' },
   battle:{ tempo: 200, scale: [294, 349, 440, 587, 440, 349], bass: [147, 147, 175, 196], wave: 'sawtooth' },
+  snow:  { tempo: 460, scale: [330, 392, 494, 587, 494, 392], bass: [98, 131, 147, 131], wave: 'sine' },     // 澄んだ高音
+  lava:  { tempo: 230, scale: [196, 233, 294, 233, 175, 233], bass: [87, 87, 116, 98], wave: 'sawtooth' },   // 重い低音
+  alien: { tempo: 300, scale: [277, 370, 415, 311, 466, 370], bass: [104, 139, 117, 156], wave: 'square' },  // 不協和な異界
 };
 function bgmNote(freq, dur, wave, vol) {
   if (!ctx) return;

@@ -169,10 +169,10 @@ scene.add(planet);
 
 // ============================================================ 惑星テーマ（多惑星ワープ）
 const THEMES = [
-  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null,     emissive: 0x000000, emI: 0,    snow: false },
-  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xeaf4ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff, emissive: 0x223344, emI: 0.12, snow: true },
-  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff6a3a, fog: 0x3a1208, enemyTint: 0xff6a40, emissive: 0xff2200, emI: 0.55, snow: false },
-  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff, emissive: 0x6a1aff, emI: 0.32, snow: false },
+  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null,     emissive: 0x000000, emI: 0,    snow: false, pool: ['slime', 'bat', 'mushroom', 'splitter'], bossName: 'スライム王 KING SLIME' },
+  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xeaf4ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff, emissive: 0x223344, emI: 0.12, snow: true,  pool: ['bat', 'splitter', 'mushroom', 'caster'], bossName: 'フロストキング FROST KING' },
+  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff6a3a, fog: 0x3a1208, enemyTint: 0xff6a40, emissive: 0xff2200, emI: 0.55, snow: false, pool: ['mushroom', 'bat', 'caster', 'slime'], bossName: 'マグマロード MAGMA LORD' },
+  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff, emissive: 0x6a1aff, emI: 0.32, snow: false, pool: ['caster', 'splitter', 'bat', 'caster'], bossName: 'ヴォイドアイ VOID EYE' },
 ];
 let themeIndex = 0, planetMul = 1;
 const fogTheme = new THREE.Color(0x1a2238);
@@ -484,7 +484,8 @@ async function warpTo() {
   for (const p of pickups) scene.remove(p.obj); pickups.length = 0;
   for (const pr of projectiles) scene.remove(pr.mesh); projectiles.length = 0;
   for (const a of aoes) scene.remove(a.grp); aoes.length = 0;
-  pDir.set(0, 1, 0); hero.hp = Math.min(hero.maxHp, hero.hp + 30); jumpH = 0; jumpV = 0; grounded = true;
+  pDir.set(0, 1, 0); hero.hp = Math.min(hero.maxHp, hero.hp + 30);
+  jumpH = 22; jumpV = 0; grounded = false; pendingLand = true; // 空から降下
   wave = 0; startWave(1); updateHUD();
   await new Promise(r => setTimeout(r, 450));
   tunnelEl.classList.remove('on');
@@ -623,6 +624,7 @@ function flash(color = '#fff', peak = 0.9) {
 
 // 昼夜でBGMの雰囲気を切替
 function dayNightMood() { return (Math.abs(timeOfDay - 0.5) * 2 > 0.55) ? 'night' : 'day'; }
+function planetMood() { return themeIndex === 0 ? dayNightMood() : ['', 'snow', 'lava', 'alien'][themeIndex]; }
 
 // ============================================================ 即時戦闘（ウェーブ制）
 const ENEMY_DEF = {
@@ -667,22 +669,19 @@ function spawnBoss(n) {
   for (const m of mats) { m.userData.be = m.emissive.clone(); }
   addOutline(e.root, 1.05);
   scene.add(e.root);
-  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, dir: freeDir().clone(), hp, maxHp: hp, atk: BOSS_DEF.atk * planetMul, alive: true, atkCD: 2, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats };
+  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, theme: themeIndex, dir: freeDir().clone(), hp, maxHp: hp, atk: BOSS_DEF.atk * planetMul, alive: true, atkCD: 2, castCD: 3, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats };
   enemies.push(bossRef);
   Audio.sfx('encounter');
-  document.getElementById('bossName').textContent = '◆ スライム王 KING SLIME ◆';
+  document.getElementById('bossName').textContent = '◆ ' + THEMES[themeIndex].bossName + ' ◆';
   bossbarEl.style.display = 'block';
-  showArea('ボスが あらわれた！', 'BOSS WAVE ' + n);
+  showArea('ボスが あらわれた！', THEMES[themeIndex].bossName);
 }
 function startWave(n) {
   wave = n;
   if (n % 5 === 0) { spawnBoss(n); updateHUD(); return; }
   const count = Math.min(11, 3 + Math.floor(n * 0.9));
   const hpScale = 1 + (n - 1) * 0.16;
-  const pool = ['slime', 'bat'];
-  if (n >= 2) pool.push('mushroom');
-  if (n >= 3) pool.push('splitter');
-  if (n >= 4) pool.push('caster', 'bat');
+  const pool = THEMES[themeIndex].pool.slice(0, n >= 3 ? undefined : 2);  // 序盤は前2種、進むと全種
   for (let i = 0; i < count; i++) spawnEnemyDef(pool[Math.floor(Math.random() * pool.length)], freeDir(), hpScale);
   showArea('WAVE ' + n, count + ' 体');
   updateHUD();
@@ -789,6 +788,30 @@ function updateEnemyBars() {
   for (let i = idx; i < ebarPool.length; i++) ebarPool[i].d.style.display = 'none';
 }
 
+// ナビ矢印: 対象の方向を画面端で指す
+const _av = new THREE.Vector3();
+function updateArrow(el, worldPos) {
+  _av.copy(worldPos).project(camera);
+  let sx = _av.x, sy = _av.y; const behind = _av.z > 1;
+  if (behind) { sx = -sx; sy = -sy; }
+  const onScreen = !behind && Math.abs(_av.x) < 0.9 && Math.abs(_av.y) < 0.9;
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  let scrX, scrY;
+  if (onScreen) { scrX = (_av.x * 0.5 + 0.5) * innerWidth; scrY = (-_av.y * 0.5 + 0.5) * innerHeight; el.style.opacity = '0.35'; }
+  else { const a = Math.atan2(-sy, sx); const rx = innerWidth * 0.42, ry = innerHeight * 0.40; scrX = cx + Math.cos(a) * rx; scrY = cy + Math.sin(a) * ry; el.style.opacity = '1'; }
+  const dx = scrX - cx, dy = scrY - cy;
+  el.style.display = 'block';
+  el.style.left = scrX + 'px'; el.style.top = scrY + 'px';
+  el.style.transform = `translate(-50%,-50%) rotate(${Math.atan2(dy, dx)}rad)`;
+}
+function updateArrows() {
+  if (gameState !== 'field') { warpArrowEl.style.display = 'none'; bossArrowEl.style.display = 'none'; return; }
+  updateArrow(warpArrowEl, _tmpW.copy(WARP_DIR).multiplyScalar(PLANET_R + 2));
+  if (bossRef && bossRef.alive) updateArrow(bossArrowEl, bossRef.model.root.position);
+  else bossArrowEl.style.display = 'none';
+}
+const warpArrowEl = document.getElementById('warpArrow'), bossArrowEl = document.getElementById('bossArrow'), _tmpW = new THREE.Vector3();
+
 // 浮遊ダメージ表示
 function showDmg(worldPos, val, cls = '') {
   const v = worldPos.clone().project(camera);
@@ -827,7 +850,7 @@ function gainExp(n) {
 // アクション状態 / 強化
 let dashT = 0, dashCD = 0, jumpH = 0, jumpV = 0, grounded = true;
 let attackT = 0, attackCD = 0, attackHit = false, invulnT = 0, hurtFlash = 0, shakeT = 0;
-let comboCount = 0, comboTimer = 0, comboHeavy = false;
+let comboCount = 0, comboTimer = 0, comboHeavy = false, pendingLand = false;
 let skillT = 0, skillCD = 0;
 let atkBonus = 0, moveMul = 1, atkCdMul = 1, dashCdMul = 1, skillCdMul = 1; // 祝福による強化
 let pendingLevels = 0;
@@ -997,6 +1020,22 @@ function updateAoes(dt) {
       if (ang < a.r) hurtPlayer(a.dmg, a.dir);
       scene.remove(a.grp); a.ring.material.dispose(); a.fill.material.dispose(); aoes.splice(i, 1);
     }
+  }
+}
+// 惑星ごとのボス必殺技
+function bossCast(e) {
+  const dmg = Math.round(e.atk);
+  if (e.theme === 1) {            // 雪: 3方向の氷弾
+    Audio.sfx('skill');
+    for (const off of [-0.4, 0, 0.4]) spawnProjectile(e.dir.clone(), pDir.clone().applyAxisAngle(e.dir, off).normalize(), dmg);
+  } else if (e.theme === 2) {     // 溶岩: 複数の地割れAOE
+    spawnAoe(pDir.clone(), 5.4, Math.round(dmg * 1.2));
+    spawnAoe(freeDir(false), 4.4, dmg);
+  } else if (e.theme === 3) {     // 異界: 放射弾幕
+    Audio.sfx('skill');
+    for (let i = 0; i < 8; i++) spawnProjectile(e.dir.clone(), pDir.clone().applyAxisAngle(e.dir, i / 8 * Math.PI * 2).normalize(), dmg);
+  } else {                        // 草原: 単発AOE
+    spawnAoe(pDir.clone(), 5.0, Math.round(dmg * 1.1));
   }
 }
 
@@ -1371,7 +1410,7 @@ function combatUpdate(dt, t) {
     const d = THREE.MathUtils.clamp(pDir.dot(e.dir), -1, 1);
     const angDist = Math.acos(d) * PLANET_R;
     const bh = e.def.behavior;
-    if (e.isBoss) { e.castCD = (e.castCD || 3) - dt; if (e.castCD <= 0 && angDist < 20) { e.castCD = 4.5; spawnAoe(pDir.clone(), 4.8, Math.round(e.atk * 1.1)); } }
+    if (e.isBoss) { e.castCD = (e.castCD || 3) - dt; if (e.castCD <= 0 && angDist < 22) { e.castCD = 4.2; bossCast(e); } }
     if (angDist < e.def.aggro) {
       if (bh === 'caster') {                              // 詠唱: 距離を取りつつ弾を撃つ
         const want = e.def.atkRange * 0.55;
@@ -1460,7 +1499,10 @@ function update(dt, t) {
   // --- ジャンプ物理（法線方向）---
   if (!grounded || jumpV !== 0) {
     jumpV -= GRAVITY * dt; jumpH += jumpV * dt;
-    if (jumpH <= 0) { jumpH = 0; jumpV = 0; grounded = true; }
+    if (jumpH <= 0) {
+      jumpH = 0; jumpV = 0; grounded = true;
+      if (pendingLand) { pendingLand = false; shakeT = Math.max(shakeT, 0.35); spawnImpact(surfPos(pDir, 0.4), 0xffffff, 16); Audio.sfx('hit'); } // 着地
+    }
   }
 
   // --- 基底とプレイヤー配置 ---
@@ -1496,6 +1538,7 @@ function update(dt, t) {
   for (const n of npcs) { n.model.root.position.copy(surfPos(n.dir, Math.sin(t * 1.8 + n.wanderT) * 0.04)); n.model.update(dt, false); }
   warpTorus.rotation.z += dt * 1.6;       // ワープゲート回転
   updateEnemyBars();
+  updateArrows();
   nearTarget = findInteract();
   updatePrompt();
 
@@ -1520,7 +1563,7 @@ function update(dt, t) {
   // 太陽は惑星中心を照らす（歩くと昼/夜の境界を越えられる）
   sun.target.position.set(0, 0, 0);
   applyTimeOfDay(timeOfDay);
-  if (Audio.audioReady()) Audio.setMood(dayNightMood());
+  if (Audio.audioReady()) Audio.setMood(planetMood());
 }
 
 function animate() {
