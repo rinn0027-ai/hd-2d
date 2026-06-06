@@ -2285,7 +2285,7 @@ function update(dt, t) {
   comboTick(dt);
   updateEffects(dt);
   hurtEl.style.opacity = Math.max(0, hurtFlash / 0.4 * 0.9);
-  if (vignetteT > 0) vignetteT -= real; vignetteEl.style.opacity = Math.max(0, vignetteT / 0.5 * 0.85);
+  if (vignetteT > 0) vignetteT -= dt; vignetteEl.style.opacity = Math.max(0, vignetteT / 0.5 * 0.85);
 
   let ix = 0, iy = 0, dash = false, playerMoving = false;
   if (gameState === 'field') {
