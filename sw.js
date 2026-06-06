@@ -1,10 +1,13 @@
 // sw.js — オフライン対応の Service Worker（アプリシェルをキャッシュ）
-const CACHE = 'hd2d-v1';
+const CACHE = 'hd2d-v2';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './assets/icon.svg',
+  './assets/icon-180.png',
+  './assets/icon-192.png',
+  './assets/icon-512.png',
   './src/main.js',
   './src/models.js',
   './src/audio.js',
