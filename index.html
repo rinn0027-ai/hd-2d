@@ -150,11 +150,11 @@
     #warpArrow { color: #7fe0ff; } #bossArrow { color: #ff6a6a; }
 
     /* レベルアップ / 商店 / スキルツリー / 結果（縦に長くてもスクロールで全部届く） */
-    #levelup, #shop, #skilltree, #gameover, #metashop, #pause { position: fixed; inset: 0; z-index: 16; display: none; flex-direction: column; align-items: center; justify-content: flex-start; gap: 14px;
+    #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #chooser { position: fixed; inset: 0; z-index: 16; display: none; flex-direction: column; align-items: center; justify-content: flex-start; gap: 14px;
       padding: 5vh 10px calc(5vh + 80px); overflow-y: auto; -webkit-overflow-scrolling: touch;
       background: rgba(6,8,16,.72); backdrop-filter: blur(4px); font-family: ui-monospace, monospace; }
-    #levelup h2, #shop h2, #skilltree h2, #gameover h2, #metashop h2, #pause h2 { color: #ffd27a; letter-spacing: .2em; font-size: 19px; text-shadow: 0 2px 10px #000; }
-    #luOpts, #shopItems, #treeNodes, #metaItems { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 94vw; }
+    #levelup h2, #shop h2, #skilltree h2, #gameover h2, #metashop h2, #pause h2, #chooser h2 { color: #ffd27a; letter-spacing: .2em; font-size: 19px; text-shadow: 0 2px 10px #000; }
+    #luOpts, #shopItems, #treeNodes, #metaItems, #chooserOpts { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 94vw; }
     #gameover .res { color: #eaf2ff; font-size: 14px; line-height: 1.9; text-align: center; }
     #gameover .lb { color: #cdd6e8; font-size: 12px; line-height: 1.7; text-align: center; min-width: 200px; }
     #gameover .lb b { color: #ffd27a; }
@@ -175,6 +175,25 @@
     #titleBtns { display: flex; flex-direction: column; gap: 10px; align-items: center; }
     #titleBtns .luCard { width: 220px; }
     #titleInfo { color: #cdd6e8; font-size: 12px; line-height: 1.7; text-align: center; margin-top: 14px; white-space: pre-wrap; max-width: 90vw; }
+    #classRow { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; flex-wrap: wrap; }
+    #classRow .cls { width: 96px; padding: 8px 6px; border-radius: 10px; border: 1px solid rgba(255,255,255,.18); background: rgba(20,26,44,.72); cursor: pointer; text-align: center; }
+    #classRow .cls.sel { border-color: #ffce6e; box-shadow: 0 0 14px rgba(255,200,110,.5); background: rgba(60,50,28,.8); }
+    #classRow .cls.lock { opacity: .6; }
+    #classRow .cls .cic { font-size: 22px; }
+    #classRow .cls .cnm { color: #ffe6a8; font-size: 13px; margin: 2px 0; }
+    #classRow .cls .cds { color: #aebbd6; font-size: 10px; line-height: 1.3; }
+    #classRow .cls .ccost { color: #7fe0ff; font-size: 10px; margin-top: 3px; }
+
+    /* コンボ表示 */
+    #combo { position: fixed; left: 50%; top: 16%; transform: translateX(-50%); z-index: 9; pointer-events: none; text-align: center;
+      font-family: ui-monospace, monospace; opacity: 0; transition: opacity .2s; }
+    #combo .cn { font-size: 34px; font-weight: 800; color: #fff; text-shadow: 0 2px 10px #000, 0 0 18px rgba(255,200,90,.7); }
+    #combo .cn small { font-size: 17px; }
+    #combo .cr { font-size: 14px; letter-spacing: .14em; color: #ffd27a; text-shadow: 0 2px 6px #000; }
+
+    /* 遺物バー */
+    #relicBar { position: fixed; left: 12px; top: 92px; z-index: 7; display: flex; gap: 4px; flex-wrap: wrap; max-width: 160px; pointer-events: none; }
+    #relicBar span { font-size: 17px; filter: drop-shadow(0 1px 2px #000); }
     .luCard { width: 168px; padding: 16px 14px; border-radius: 12px; cursor: pointer; pointer-events: auto;
       background: linear-gradient(180deg, rgba(30,36,58,.96), rgba(16,20,34,.97)); border: 2px solid rgba(255,210,130,.5); color: #eaf2ff; text-align: center; }
     .luCard:hover, .luCard.sel { border-color: #ffd27a; background: rgba(255,210,130,.18); transform: translateY(-2px); }
@@ -315,6 +334,8 @@
   <button id="btnWep" class="actBtn gfont">⚔弓</button>
   <button id="btnTree" class="actBtn gfont">🌳</button>
   <button id="btnPause" class="gfont">⏸</button>
+  <div id="combo"><div class="cn"></div><div class="cr"></div></div>
+  <div id="relicBar"></div>
   <div id="hint" class="gfont"></div>
 
   <div id="hud" class="gfont">
@@ -370,11 +391,13 @@
   <div id="skilltree"><h2>🌳 スキルツリー <span id="treeSP"></span></h2><div id="treeNodes"></div><div id="treeClose" class="luCard">とじる</div></div>
   <div id="gameover"><h2 id="goTitle">GAME OVER</h2><div class="res" id="goRes"></div><div class="lb" id="goBoard"></div><div class="res" id="goMeta" style="color:#7fe0ff"></div><div id="goMetaBtn" class="luCard">💎 永久強化</div><div id="goRestart" class="luCard">もう一度</div><div id="goTitleBtn" class="luCard">タイトルへ</div></div>
   <div id="metashop"><h2>💎 永久強化 <span id="metaGems"></span></h2><div id="metaItems"></div><div id="metaClose" class="luCard">もどる</div></div>
+  <div id="chooser"><h2 id="chooserTitle">選べ</h2><div id="chooserOpts"></div></div>
   <div id="pause"><h2>PAUSE</h2><div class="res">BGM音量 <input id="volSlider" type="range" min="0" max="1" step="0.05" value="1"></div><div id="pauseResume" class="luCard">つづける</div><div id="pauseMeta" class="luCard">💎 永久強化</div><div id="pauseTitle" class="luCard">タイトルへ</div></div>
 
   <div id="title">
     <h1>PLANET<br>RAIDER</h1>
     <div class="tsub">めぐる小さな星のアクション</div>
+    <div id="classRow"></div>
     <div id="titleBtns">
       <div id="tStart" class="luCard">▶ はじめる</div>
       <div id="tMeta" class="luCard">💎 永久強化</div>

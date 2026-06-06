@@ -654,7 +654,8 @@ function freeDir(awayFromPlayer = true) {
 const ELITE_AFFIX = ['tough', 'enrage', 'split'];
 function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1, isChild = false) {
   const def = ENEMY_DEF[key];
-  const elite = !isChild && wave >= 2 && Math.random() < 0.14;   // 精英怪
+  const elite = !isChild && (forceElite > 0 || (wave >= 2 && Math.random() < 0.14));   // 精英怪（ノード強制含む）
+  if (elite && forceElite > 0) forceElite--;
   const e = M.makeEnemy(def.model);
   const escale = def.scale * childScale * (elite ? 1.45 : 1);
   e.root.scale.setScalar(escale);
@@ -849,11 +850,13 @@ function updateArrowsP(dt) {
       if (!e.alive) continue;
       const ang = Math.acos(THREE.MathUtils.clamp(p.dir.dot(e.dir), -1, 1)) * PLANET_R;
       if (ang < e.def.scale * 0.9 + 0.7) {
-        const crit = Math.random() < 0.2 + gearBonus.crit; let tot = crit ? p.dmg * 2 : p.dmg;
+        const crit = Math.random() < critTotal(); let tot = crit ? p.dmg * 2 : p.dmg;
         if (e.affix === 'tough') tot = Math.round(tot * 0.6);
-        e.hp -= tot; e.hitFlash = 0.18;
+        e.hp -= tot; e.hitFlash = 0.18; registerHit(); if (crit) critFlash();
         if (Math.random() < 0.4) addStatus(e, 'poison', 4);   // 弓で毒
-        if (gearBonus.lifesteal > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * gearBonus.lifesteal);
+        if (relicCount('fire')) addStatus(e, 'burn', 3);
+        if (relicCount('frost') && Math.random() < 0.35) addStatus(e, 'freeze', 1.5);
+        const ls = lifestealTotal(); if (ls > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * ls);
         showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), tot, crit ? 'crit' : '');
         spawnImpact(p.mesh.position.clone(), 0xffe6a0, 5); Audio.sfx('hit');
         if (e.hp <= 0) killEnemy(e);
@@ -997,8 +1000,9 @@ function ringDamage(r, dmg, color, knock, applyStatus) {
   for (const e of enemies) {
     if (!e.alive) continue;
     if (pDir.dot(e.dir) < co) continue;
-    e.hp -= e.affix === 'tough' ? Math.round(dmg * 0.6) : dmg; e.hitFlash = 0.2;
+    e.hp -= e.affix === 'tough' ? Math.round(dmg * 0.6) : dmg; e.hitFlash = 0.2; registerHit();
     if (applyStatus) addStatus(e, applyStatus, 3);
+    if (relicCount('fire')) addStatus(e, 'burn', 3);
     showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), dmg, 'crit');
     spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.2), color, 5);
     if (!e.isBoss) { _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -knock).normalize(); }
@@ -1008,11 +1012,11 @@ function ringDamage(r, dmg, color, knock, applyStatus) {
 function castSpin() {   // 旋回斬り: 中範囲・高火力・灼熱
   skillT = SKILL_DUR; invulnT = Math.max(invulnT, 0.35); Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
   spawnImpact(player.position.clone().addScaledVector(pDir, 1.0), 0xbf8aff, 14);
-  ringDamage(SKILL_RANGE, 22 + hero.level * 3 + atkBonus * 2 + gearBonus.atk * 2, 0xbf8aff, 0.12, 'burn');
+  ringDamage(SKILL_RANGE, Math.round((22 + hero.level * 3 + atkBonus * 2 + gearBonus.atk * 2) * skillDmgMul()), 0xbf8aff, 0.12, 'burn');
 }
 function castShock() {  // 衝撃波: 広範囲・低火力・大ノックバック
   Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
-  ringDamage(7.5, 14 + hero.level * 2 + atkBonus + gearBonus.atk, 0x7fd8ff, 0.3, 'freeze');
+  ringDamage(7.5, Math.round((14 + hero.level * 2 + atkBonus + gearBonus.atk) * skillDmgMul()), 0x7fd8ff, 0.3, 'freeze');
 }
 function castHeal() {   // 治癒: 大回復＋短い無敵
   Audio.sfx('heal'); const h = Math.round(hero.maxHp * 0.35);
@@ -1045,6 +1049,11 @@ function hurtPlayer(dmg, fromDir) {
   if (invulnT > 0 || dashT > 0) return;
   hero.hp -= dmg; invulnT = 0.7; hurtFlash = 0.4; shakeT = Math.max(shakeT, 0.25); Audio.sfx('hit');
   showDmg(player.position.clone().addScaledVector(pDir, 2.6), Math.round(dmg));
+  hitCombo = 0; comboEl.style.opacity = '0';                  // 被弾でコンボ途切れ
+  if (relicCount('thorn')) {                                   // 茨の鎧: 周囲反撃
+    spawnShock(pDir.clone(), 6, 0xffd27a); const tco = Math.cos(6 / PLANET_R), td = 20 + hero.level * 3;
+    for (const o of enemies) if (o.alive && pDir.dot(o.dir) > tco) { o.hp -= td; o.hitFlash = 0.2; spawnImpact(o.model.root.position.clone().addScaledVector(o.dir, 1), 0xffd27a, 4); if (o.hp <= 0) killEnemy(o); }
+  }
   if (fromDir) { _axis.crossVectors(pDir, fromDir).normalize(); pDir.applyAxisAngle(_axis, -0.05).normalize(); }
   updateHUD();
   if (hero.hp <= 0) {
@@ -1062,6 +1071,11 @@ function killEnemy(e) {
   if (!e.alive) return;
   const em = e.elite ? 2.5 : 1;
   e.alive = false; e.dead = 0.5; gainExp(Math.round(e.def.exp * planetMul * em));
+  if (relicCount('chain')) {                                   // 連鎖爆発
+    spawnImpact(e.model.root.position.clone(), 0xffae3a, 12); spawnShock(e.dir.clone(), 5, 0xffae3a);
+    const cco = Math.cos(5 / PLANET_R), cd = 18 + hero.level * 2;
+    for (const o of enemies) if (o !== e && o.alive && e.dir.dot(o.dir) > cco) { o.hp -= cd; o.hitFlash = 0.2; if (o.hp <= 0) killEnemy(o); }
+  }
   score += Math.round((e.def.score || 10) * planetMul * em);
   spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.0), e.elite ? 0xffd27a : 0xffd27a, e.elite ? 18 : 10);
   // 掉落
@@ -1086,6 +1100,7 @@ function killEnemy(e) {
     hero.hp = hero.maxHp; Audio.sfx('victory');
     showArea(THEMES[e.theme].bossName + ' 撃破！', 'BOSS DEFEATED');
     if (e.theme === 3) { setTimeout(() => gameOver(true), 1600); }   // 異界ボス＝通关
+    else setTimeout(() => { if (gameState === 'field') offerRelics(); }, 1300); // ボス報酬: 遺物選択
   } else {
     Audio.sfx('chest');
   }
@@ -1153,7 +1168,7 @@ function buyItem(i) {
   if (coins < it.cost) { Audio.sfx('cancel'); return; }
   coins -= it.cost; it.ap(); Audio.sfx('confirm'); updateHUD(); renderShop();
 }
-function closeShop() { shopEl.style.display = 'none'; gameState = 'field'; }
+function closeShop() { shopEl.style.display = 'none'; gameState = 'field'; if (pendingAfterShop) { pendingAfterShop = false; startWave(wave + 1); } }
 shopCloseEl.addEventListener('click', closeShop);
 shopCloseEl.addEventListener('touchstart', e => { e.preventDefault(); closeShop(); }, { passive: false });
 
@@ -1237,6 +1252,137 @@ function closeMeta() { metaEl.style.display = 'none'; if (metaReturn === 'gameov
 metaCloseEl.addEventListener('click', closeMeta);
 metaCloseEl.addEventListener('touchstart', e => { e.preventDefault(); closeMeta(); }, { passive: false });
 
+// ============================================================ 職業 / 遺物 / コンボ
+meta.cls = meta.cls || {}; meta.lastClass = meta.lastClass || 'warrior';
+const CLASSES = {
+  warrior: { nm: '戦士', ic: '⚔️', ds: '高HP・剣・近接', hp: 1.2, atk: 4, weapon: 'sword', bow: false, crit: 0, cdMul: 1, slot2: 'shock', move: 1, cost: 0 },
+  archer:  { nm: '弓手', ic: '🏹', ds: '弓・高暴撃・低HP', hp: 0.85, atk: 2, weapon: 'bow', bow: true, crit: 0.13, cdMul: 1, slot2: 'shock', move: 1.08, cost: 80 },
+  mage:    { nm: '法師', ic: '🔮', ds: 'スキル特化・治癒', hp: 0.8, atk: 1, weapon: 'sword', bow: false, crit: 0, cdMul: 0.6, slot2: 'heal', move: 1, cost: 160 },
+};
+let currentClass = meta.lastClass in CLASSES ? meta.lastClass : 'warrior';
+let classCrit = 0;
+function classUnlocked(k) { return CLASSES[k].cost === 0 || meta.cls[k]; }
+function applyClass() {
+  const c = CLASSES[currentClass];
+  hero.maxHp = Math.round((100 + meta.hp * 20) * c.hp); hero.hp = hero.maxHp;
+  atkBonus = meta.atk * 3 + c.atk;
+  weapon = c.weapon; bowUnlocked = c.bow || meta.bow > 0;
+  classCrit = c.crit; skillCdMul = c.cdMul; skillSlot2 = c.slot2;
+}
+
+// ---- 遺物（局内・永続パッシブ、重ね掛け可） ----
+const RELIC_DEFS = [
+  { k: 'fire',  ic: '🔥', nm: '火の刻印', ds: '近接に灼熱付与' },
+  { k: 'venom', ic: '🐍', nm: '毒牙', ds: '近接に毒付与' },
+  { k: 'frost', ic: '❄️', nm: '氷塊', ds: '攻撃35%で凍結' },
+  { k: 'vamp',  ic: '🩸', nm: '吸血の護符', ds: '与ダメ10%回復' },
+  { k: 'crit',  ic: '🎯', nm: '狙撃眼', ds: '暴撃率+15%' },
+  { k: 'chain', ic: '⚡', nm: '連鎖爆発', ds: '击杀で周囲に爆発' },
+  { k: 'swift', ic: '💨', nm: '疾風の靴', ds: '移動速度+12%' },
+  { k: 'gold',  ic: '💰', nm: '黄金の手', ds: 'コイン+1' },
+  { k: 'amp',   ic: '🔮', nm: '魔力増幅', ds: 'スキル威力+35%' },
+  { k: 'thorn', ic: '🛡️', nm: '茨の鎧', ds: '被弾時に周囲反撃' },
+];
+const RELIC_MAP = {}; for (const r of RELIC_DEFS) RELIC_MAP[r.k] = r;
+let relics = [];
+function relicCount(k) { let n = 0; for (const r of relics) if (r === k) n++; return n; }
+function skillDmgMul() { return 1 + relicCount('amp') * 0.35; }
+function critTotal() { return 0.2 + gearBonus.crit + classCrit + relicCount('crit') * 0.15; }
+function lifestealTotal() { return gearBonus.lifesteal + relicCount('vamp') * 0.10; }
+function recomputeStats() {
+  const c = CLASSES[currentClass];
+  moveMul = (1 + meta.move * 0.05) * c.move * Math.pow(1.12, relicCount('swift'));
+  coinBonus = meta.coin + relicCount('gold');
+}
+const relicBarEl = document.getElementById('relicBar');
+function renderRelicBar() {
+  const seen = {}; relicBarEl.innerHTML = '';
+  for (const k of relics) { seen[k] = (seen[k] || 0) + 1; }
+  for (const k in seen) { const s = document.createElement('span'); s.textContent = RELIC_MAP[k].ic + (seen[k] > 1 ? seen[k] : ''); s.title = RELIC_MAP[k].nm; relicBarEl.appendChild(s); }
+}
+function addRelic(k) { relics.push(k); recomputeStats(); renderRelicBar(); Audio.sfx('chest'); showArea(RELIC_MAP[k].nm + ' を獲得', RELIC_MAP[k].ds); }
+
+// ---- コンボ表示 ----
+const comboEl = document.getElementById('combo'), comboNumEl = comboEl.querySelector('.cn'), comboRankEl = comboEl.querySelector('.cr');
+let hitCombo = 0, hitComboT = 0;
+function comboRank(n) { return n >= 50 ? '神業!!' : n >= 30 ? 'COOL!' : n >= 15 ? 'GREAT!' : n >= 6 ? 'GOOD!' : ''; }
+function registerHit() {
+  hitCombo++; hitComboT = 2.2;
+  if (hitCombo >= 6) { score += 1; }
+  comboNumEl.innerHTML = hitCombo + '<small> HIT</small>';
+  comboRankEl.textContent = comboRank(hitCombo);
+  comboEl.style.opacity = '1';
+  const sc = 1 + Math.min(hitCombo, 40) * 0.01;
+  comboNumEl.style.transform = `scale(${sc})`;
+}
+function comboTick(dt) {
+  if (hitComboT > 0) { hitComboT -= dt; if (hitComboT <= 0) { hitCombo = 0; comboEl.style.opacity = '0'; } }
+}
+// 暴撃/重撃のヒットフラッシュ（既存hurtFlashを白で使い回し）
+function critFlash() { hurtFlash = Math.max(hurtFlash, 0.12); }
+
+// ---- 汎用3択チューザー（遺物・分岐ノードで共用） ----
+const chooserEl = document.getElementById('chooser'), chooserTitleEl = document.getElementById('chooserTitle'), chooserOptsEl = document.getElementById('chooserOpts');
+let chooserCb = null;
+function showChooser(title, items) {
+  chooserTitleEl.textContent = title; chooserOptsEl.innerHTML = '';
+  gameState = 'chooser'; resetTouch();
+  items.forEach(it => {
+    const c = document.createElement('div'); c.className = 'luCard';
+    c.innerHTML = `<div class="ic">${it.ic}</div><div class="nm">${it.nm}</div><div class="ds">${it.ds}</div>`;
+    const pick = () => { if (gameState !== 'chooser') return; chooserEl.style.display = 'none'; Audio.sfx('confirm'); it.pick(); };
+    c.addEventListener('click', pick);
+    c.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); pick(); }, { passive: false });
+    chooserOptsEl.appendChild(c);
+  });
+  chooserEl.style.display = 'flex';
+}
+function offerRelics(after) {
+  after = after || (() => { gameState = 'field'; });
+  const pool = RELIC_DEFS.slice(); const items = [];
+  for (let i = 0; i < 3 && pool.length; i++) {
+    const d = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+    items.push({ ic: d.ic, nm: d.nm, ds: d.ds, pick: () => { addRelic(d.k); after(); } });
+  }
+  showChooser('遺物を選べ', items);
+}
+// ---- タイトルの職業選択 ----
+const classRowEl = document.getElementById('classRow');
+function renderClassRow() {
+  classRowEl.innerHTML = '';
+  for (const k in CLASSES) {
+    const c = CLASSES[k], unlocked = classUnlocked(k), sel = currentClass === k;
+    const el = document.createElement('div'); el.className = 'cls' + (sel ? ' sel' : '') + (unlocked ? '' : ' lock');
+    el.innerHTML = `<div class="cic">${c.ic}</div><div class="cnm">${c.nm}</div><div class="cds">${c.ds}</div>` + (unlocked ? '' : `<div class="ccost">💎${c.cost}</div>`);
+    const act = () => {
+      if (classUnlocked(k)) { currentClass = k; Audio.sfx('cursor'); }
+      else if (meta.gems >= c.cost) { meta.gems -= c.cost; meta.cls[k] = 1; currentClass = k; saveMeta(); Audio.sfx('confirm'); }
+      else { Audio.sfx('cancel'); }
+      renderClassRow(); showTitle();
+    };
+    el.addEventListener('click', act);
+    el.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); act(); }, { passive: false });
+    classRowEl.appendChild(el);
+  }
+}
+
+// ---- 分岐ノード（ウェーブ間の選択） ----
+let forceElite = 0, pendingAfterShop = false;
+function advanceWave() { chooserEl.style.display = 'none'; gameState = 'field'; startWave(wave + 1); }
+function openNodePick() {
+  const extras = ['elite', 'rest', 'shop', 'treasure'];
+  for (let i = extras.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [extras[i], extras[j]] = [extras[j], extras[i]]; }
+  const NODES = {
+    battle:   { ic: '⚔️', nm: '通常戦', ds: '次のウェーブへ', pick: () => advanceWave() },
+    elite:    { ic: '👑', nm: '精英戦', ds: '強敵＋良報酬', pick: () => { forceElite = 2; advanceWave(); } },
+    rest:     { ic: '🏕️', nm: '休息地', ds: 'HP40%回復', pick: () => { hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.4); updateHUD(); advanceWave(); } },
+    shop:     { ic: '🛒', nm: '行商人', ds: '買い物して進む', pick: () => { pendingAfterShop = true; chooserEl.style.display = 'none'; openShop(); } },
+    treasure: { ic: '🎁', nm: '宝箱', ds: '遺物を獲得', pick: () => { offerRelics(() => advanceWave()); } },
+  };
+  const items = [NODES.battle, NODES[extras[0]], NODES[extras[1]]];
+  showChooser('星図：次の地を選べ', items);
+}
+
 // ============================================================ ゲームオーバー / 結果 / 排行榜
 const goEl = document.getElementById('gameover'), goResEl = document.getElementById('goRes'), goBoardEl = document.getElementById('goBoard'), goTitleEl = document.getElementById('goTitle'), goRestartEl = document.getElementById('goRestart'), goMetaEl = document.getElementById('goMeta'), goMetaBtn = document.getElementById('goMetaBtn'), goTitleBtn = document.getElementById('goTitleBtn');
 let board = [];
@@ -1274,7 +1420,11 @@ function beginRun() {
   equippedGear = null; recomputeGear(); airSlam = false; dashAttack = false; gravMul = 1;
   skillSlot2 = 'shock'; healUnlocked = false;
   score = 0; coins = 0; planetMul = 1; themeIndex = 0; applyTheme(0);
+  relics = []; forceElite = 0; pendingAfterShop = false; hitCombo = 0; hitComboT = 0; comboEl.style.opacity = '0';
   applyMeta();                          // メタ強化を反映（HP/攻撃/移動/弓/復活/金運）
+  applyClass();                         // 職業を反映（HP/攻撃/弓/暴撃/CD/スキル2）
+  recomputeStats(); renderRelicBar();   // 遺物（最初は空）込みで再計算
+  meta.lastClass = currentClass; saveMeta();
   pDir.set(0, 1, 0); jumpH = 0; jumpV = 0; grounded = true; invulnT = 1.5;
   wave = 0; gameState = 'field'; startWave(1); updateHUD();
 }
@@ -1292,8 +1442,8 @@ goTitleBtn.addEventListener('touchstart', e => { e.preventDefault(); backToTitle
 const titleEl = document.getElementById('title'), titleInfoEl = document.getElementById('titleInfo');
 const pauseEl = document.getElementById('pause');
 function showTitle() {
-  gameState = 'title'; titleEl.style.display = 'flex';
-  titleInfoEl.textContent = `自己ベスト: WAVE ${best.wave} / SCORE ${best.score}\n💎 ${meta.gems}`;
+  gameState = 'title'; titleEl.style.display = 'flex'; renderClassRow();
+  titleInfoEl.textContent = `職業: ${CLASSES[currentClass].nm}（カードで変更）\n自己ベスト WAVE ${best.wave} / SCORE ${best.score} ・ 💎 ${meta.gems}`;
 }
 document.getElementById('tStart').addEventListener('click', () => { kickAudio(); startGame(); });
 document.getElementById('tStart').addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); startGame(); }, { passive: false });
@@ -1439,6 +1589,7 @@ addEventListener('keydown', e => {
   if (gameState === 'shop') { if (k >= '1' && k <= '4') buyItem(+k - 1); else if (k === 'escape' || k === 'f' || k === 'enter') closeShop(); return; }
   if (gameState === 'skilltree') { if (k >= '1' && k <= '8') buyNode(+k - 1); else if (k === 'escape' || k === 't' || k === 'f') closeTree(); return; }
   if (gameState === 'meta') { if (k === 'escape' || k === 'f') closeMeta(); return; }
+  if (gameState === 'chooser') { if (k >= '1' && k <= '3') { const cs = chooserOptsEl.children; if (cs[+k - 1]) cs[+k - 1].click(); } return; }
   if (gameState === 'gameover') { if (k === 'enter' || k === ' ' || k === 'r') restartRun(); return; }
   if (gameState === 'title') { if (k === 'enter' || k === ' ') startGame(); return; }
   if (gameState === 'paused') { if (k === 'escape' || k === 'p' || k === 'enter') togglePause(); return; }
@@ -1510,7 +1661,7 @@ function endJoy() {
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #btnSkill2, #btnWep, #btnTree, #btnPause, #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #title')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #btnSkill2, #btnWep, #btnTree, #btnPause, #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #title, #chooser')); }
 
 // タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
 function assignRoles() {
@@ -1750,12 +1901,15 @@ function combatUpdate(dt, t) {
       let dmg = 8 + hero.level * 2 + atkBonus + gearBonus.atk + Math.floor(Math.random() * 5);
       if (comboHeavy) dmg = Math.floor(dmg * 1.8);
       if (dashAttack) dmg = Math.floor(dmg * 1.4);
-      const crit = Math.random() < 0.2 + gearBonus.crit; let tot = crit ? dmg * 2 : dmg;
+      const crit = Math.random() < critTotal(); let tot = crit ? dmg * 2 : dmg;
       if (e.affix === 'tough') tot = Math.round(tot * 0.6);
-      e.hp -= tot; e.hitFlash = 0.18;
+      e.hp -= tot; e.hitFlash = 0.18; registerHit();
       if (comboHeavy) addStatus(e, 'freeze', 1.5);            // 3段で凍結
-      if (gearBonus.lifesteal > 0) { hero.hp = Math.min(hero.maxHp, hero.hp + tot * gearBonus.lifesteal); }
-      if (crit || comboHeavy) hitStop = Math.max(hitStop, 0.05); // 顿帧
+      if (relicCount('fire')) addStatus(e, 'burn', 3);
+      if (relicCount('venom')) addStatus(e, 'poison', 4);
+      if (relicCount('frost') && Math.random() < 0.35) addStatus(e, 'freeze', 1.5);
+      const ls = lifestealTotal(); if (ls > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * ls);
+      if (crit || comboHeavy) { hitStop = Math.max(hitStop, crit ? 0.07 : 0.05); critFlash(); } // 顿帧+闪光
       showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3.2 : 1.8), tot, crit ? 'crit' : '');
       spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 2.2 : 1.2), 0xfff2c0, crit ? 8 : 5);
       Audio.sfx('hit');
@@ -1821,6 +1975,7 @@ function update(dt, t) {
   if (invulnT > 0) invulnT -= dt; if (hurtFlash > 0) hurtFlash -= dt;
   if (skillT > 0) skillT -= dt; if (skillCD > 0) skillCD -= dt; if (skill2CD > 0) skill2CD -= dt; if (shakeT > 0) shakeT -= dt;
   if (comboTimer > 0) comboTimer -= dt; else comboHeavy = false;
+  comboTick(dt);
   updateEffects(dt);
   hurtEl.style.opacity = Math.max(0, hurtFlash / 0.4 * 0.9);
 
@@ -1862,8 +2017,8 @@ function update(dt, t) {
     updatePickups(dt);
     planetHazard(dt, t);
     // ウェーブ進行：全滅したら少し待って次のウェーブ
-    if (waveBreak > 0) { waveBreak -= dt; if (waveBreak <= 0) startWave(wave + 1); }
-    else if (enemies.length === 0) { waveBreak = 2.4; score += 50; saveBest(); showArea('WAVE ' + wave + ' クリア！', '+50'); updateHUD(); }
+    if (waveBreak > 0) { waveBreak -= dt; if (waveBreak <= 0) { if ((wave + 1) % 5 === 0) startWave(wave + 1); else openNodePick(); } }
+    else if (enemies.length === 0) { waveBreak = 1.6; score += 50; saveBest(); showArea('WAVE ' + wave + ' クリア！', '+50'); updateHUD(); }
   } else {
     camRot = 0;
   }
