@@ -13,6 +13,17 @@ import * as Audio from './audio.js';
 // ============================================================ renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// WebGLコンテキスト消失（特にiOSのメモリ逼迫時）の安全網：完全フリーズを防ぎ復帰を促す
+let glLost = false;
+renderer.domElement.addEventListener('webglcontextlost', e => {
+  e.preventDefault(); glLost = true;
+  let ov = document.getElementById('glLost');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'glLost'; ov.style.cssText = 'position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;text-align:center;background:rgba(6,8,16,.92);color:#ffd27a;font-family:ui-monospace,monospace;font-size:15px;line-height:1.8;padding:24px'; ov.innerHTML = '描画が一時停止しました<br><small style="color:#cdd6e8">メモリ解放のため復帰を試みています…</small><br><br><span id="glReload" style="display:inline-block;margin-top:8px;padding:10px 20px;border:1px solid #ffce6e;border-radius:10px;cursor:pointer">タップして再読み込み</span>'; document.body.appendChild(ov); ov.querySelector('#glReload').addEventListener('click', () => location.reload()); ov.querySelector('#glReload').addEventListener('touchstart', ev => { ev.preventDefault(); location.reload(); }, { passive: false }); }
+  ov.style.display = 'flex';
+}, false);
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  glLost = false; const ov = document.getElementById('glLost'); if (ov) ov.style.display = 'none';
+}, false);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -47,6 +58,16 @@ function addOutline(group, k = 1.08) {
   group.traverse(o => { if (o.isMesh && !o.userData.outline) meshes.push(o); });
   for (const o of meshes) { const ol = new THREE.Mesh(o.geometry, OUTLINE_MAT); ol.scale.setScalar(k); ol.castShadow = false; ol.receiveShadow = false; ol.userData.outline = true; o.add(ol); }
 }
+// GPUリソース解放：使い捨てオブジェクトをシーンから外したら必ず呼ぶ（iOSのコンテキスト消失対策）
+const SHARED_GEO = new Set();              // 共有ジオメトリ（dispose禁止）
+function disposeObject3D(obj) {
+  obj.traverse(o => {
+    if (o.geometry && !SHARED_GEO.has(o.geometry)) o.geometry.dispose();
+    const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+    for (const m of mats) if (m && m !== OUTLINE_MAT && !(m.userData && m.userData.keep)) m.dispose();
+  });
+}
+function removeAndDispose(obj) { scene.remove(obj); disposeObject3D(obj); }
 
 // ============================================================ camera（低FOVで箱庭パース）
 const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 400);
@@ -481,12 +502,12 @@ async function warpTo() {
   // ③ トンネル中に惑星を入れ替え
   themeIndex = (themeIndex + 1) % THEMES.length; planetMul *= 1.3;
   applyTheme(themeIndex);
-  for (const e of enemies) scene.remove(e.model.root); enemies.length = 0;
+  for (const e of enemies) removeAndDispose(e.model.root); enemies.length = 0;
   bossRef = null; bossbarEl.style.display = 'none';
-  for (const p of pickups) scene.remove(p.obj); pickups.length = 0;
-  for (const pr of projectiles) scene.remove(pr.mesh); projectiles.length = 0;
-  for (const ar of arrows) scene.remove(ar.mesh); arrows.length = 0;
-  for (const a of aoes) scene.remove(a.grp); aoes.length = 0;
+  for (const p of pickups) removeAndDispose(p.obj); pickups.length = 0;
+  for (const pr of projectiles) removeAndDispose(pr.mesh); projectiles.length = 0;
+  for (const ar of arrows) removeAndDispose(ar.mesh); arrows.length = 0;
+  for (const a of aoes) removeAndDispose(a.grp); aoes.length = 0;
   pDir.set(0, 1, 0); hero.hp = Math.min(hero.maxHp, hero.hp + 30);
   jumpH = 22; jumpV = 0; grounded = false; pendingLand = true; // 空から降下
   wave = 0; startWave(1); updateHUD();
@@ -735,7 +756,7 @@ function updateEffects(dt) {
 }
 // スキル等の攻撃範囲を示す拡散リング
 const shocks = [];
-const shockRingGeo = new THREE.RingGeometry(0.86, 1.0, 40);
+const shockRingGeo = new THREE.RingGeometry(0.86, 1.0, 40); SHARED_GEO.add(shockRingGeo);
 function spawnShock(dir, r, color = 0xbf8aff) {
   const grp = new THREE.Group();
   grp.add(new THREE.Mesh(shockRingGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false })));
@@ -849,8 +870,8 @@ function updatePickups(dt) {
     if (ang < 3.0) { _axis.crossVectors(p.dir, pDir).normalize(); p.dir.applyAxisAngle(_axis, Math.min(9 * dt / PLANET_R, ang / PLANET_R)).normalize(); }
     p.obj.position.copy(surfPos(p.dir, 0.85 + Math.sin(p.t * 3) * 0.12));
     alignUp(p.obj, p.dir); p.obj.children[0].rotation.y += dt * 3;
-    if (ang < 1.0 && p.life > 0) { collectPickup(p.type, p.data); scene.remove(p.obj); pickups.splice(i, 1); }
-    else if (p.life <= 0) { scene.remove(p.obj); pickups.splice(i, 1); }
+    if (ang < 1.0 && p.life > 0) { collectPickup(p.type, p.data); removeAndDispose(p.obj); pickups.splice(i, 1); }
+    else if (p.life <= 0) { removeAndDispose(p.obj); pickups.splice(i, 1); }
   }
 }
 
@@ -870,8 +891,8 @@ function updateProjectiles(dt) {
     p.dir.applyAxisAngle(p.axis, p.speed * dt / PLANET_R).normalize();
     p.mesh.position.copy(surfPos(p.dir, 1.5)); p.mesh.rotation.y += dt * 6;
     const ang = Math.acos(THREE.MathUtils.clamp(pDir.dot(p.dir), -1, 1)) * PLANET_R;
-    if (ang < 1.4) { hurtPlayer(p.dmg, p.dir); spawnImpact(p.mesh.position.clone(), 0xc78aff, 6); scene.remove(p.mesh); projectiles.splice(i, 1); }
-    else if (p.life <= 0) { scene.remove(p.mesh); projectiles.splice(i, 1); }
+    if (ang < 1.4) { hurtPlayer(p.dmg, p.dir); spawnImpact(p.mesh.position.clone(), 0xc78aff, 6); removeAndDispose(p.mesh); projectiles.splice(i, 1); }
+    else if (p.life <= 0) { removeAndDispose(p.mesh); projectiles.splice(i, 1); }
   }
 }
 
@@ -924,7 +945,7 @@ function updateArrowsP(dt) {
         hit = true; break;
       }
     }
-    if (hit || p.life <= 0) { scene.remove(p.mesh); arrows.splice(i, 1); }
+    if (hit || p.life <= 0) { removeAndDispose(p.mesh); arrows.splice(i, 1); }
   }
 }
 
@@ -1638,11 +1659,11 @@ function gameOver(cleared) {
   goEl.style.display = 'flex';
 }
 function clearRun() {
-  for (const e of enemies) scene.remove(e.model.root); enemies.length = 0; bossRef = null; bossbarEl.style.display = 'none';
-  for (const p of pickups) scene.remove(p.obj); pickups.length = 0;
-  for (const pr of projectiles) scene.remove(pr.mesh); projectiles.length = 0;
-  for (const ar of arrows) scene.remove(ar.mesh); arrows.length = 0;
-  for (const a of aoes) scene.remove(a.grp); aoes.length = 0;
+  for (const e of enemies) removeAndDispose(e.model.root); enemies.length = 0; bossRef = null; bossbarEl.style.display = 'none';
+  for (const p of pickups) removeAndDispose(p.obj); pickups.length = 0;
+  for (const pr of projectiles) removeAndDispose(pr.mesh); projectiles.length = 0;
+  for (const ar of arrows) removeAndDispose(ar.mesh); arrows.length = 0;
+  for (const a of aoes) removeAndDispose(a.grp); aoes.length = 0;
 }
 function beginRun() {
   goEl.style.display = 'none'; titleEl.style.display = 'none';
@@ -1708,7 +1729,7 @@ volSlider.addEventListener('input', e => { Audio.setVolume(+e.target.value); try
 
 // ============================================================ ボスの範囲攻撃（地面の赤円→爆発）
 const aoes = [];
-const aoeRingGeo = new THREE.RingGeometry(0.82, 1.0, 36);
+const aoeRingGeo = new THREE.RingGeometry(0.82, 1.0, 36); SHARED_GEO.add(aoeRingGeo);
 const aoeFillGeo = new THREE.CircleGeometry(1.0, 36);
 function spawnAoe(dir, r, dmg, color = 0xff3a3a) {
   const grp = new THREE.Group();
@@ -1756,7 +1777,7 @@ function updateAoes(dt) {
       spawnImpact(surfPos(a.dir, 0.6), 0xff5a3a, 16); shakeT = Math.max(shakeT, 0.32);
       const ang = Math.acos(THREE.MathUtils.clamp(pDir.dot(a.dir), -1, 1)) * PLANET_R;
       if (ang < a.r) hurtPlayer(a.dmg, a.dir);
-      scene.remove(a.grp); a.ring.material.dispose(); a.fill.material.dispose(); aoes.splice(i, 1);
+      removeAndDispose(a.grp); aoes.splice(i, 1);
     }
   }
 }
@@ -2250,7 +2271,7 @@ function combatUpdate(dt, t) {
     orientStanding(e.model.root, e.dir, _md.lengthSq() > 1e-6 ? _md : heading);
   }
   // 死亡済みを配列から除去
-  for (let i = enemies.length - 1; i >= 0; i--) { const e = enemies[i]; if (!e.alive && e.dead <= 0) { scene.remove(e.model.root); enemies.splice(i, 1); } }
+  for (let i = enemies.length - 1; i >= 0; i--) { const e = enemies[i]; if (!e.alive && e.dead <= 0) { removeAndDispose(e.model.root); enemies.splice(i, 1); } }
   if (bossRef) bossHpEl.style.width = Math.max(0, bossRef.hp / bossRef.maxHp * 100) + '%';
 }
 
@@ -2401,7 +2422,7 @@ function animate() {
   update(dt, t);
   updateDialogue(real);
   gradePass.uniforms.uTime.value = (t * 9) % 100 + 1; // グレインは常時更新
-  composer.render();
+  if (!glLost) composer.render();
 }
 
 // 起動：タイトル画面から
