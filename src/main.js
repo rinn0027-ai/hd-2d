@@ -710,6 +710,22 @@ function updateEffects(dt) {
     f.sp.position.addScaledVector(f.v, dt); f.v.multiplyScalar(0.88);
     const k = f.life / f.max; f.sp.material.opacity = k; f.sp.scale.setScalar((0.4 + (1 - k) * 1.6));
   }
+  for (let i = shocks.length - 1; i >= 0; i--) {
+    const s = shocks[i]; s.t -= dt; const k = 1 - s.t / s.max;
+    if (s.t <= 0) { scene.remove(s.grp); s.grp.children[0].material.dispose(); shocks.splice(i, 1); continue; }
+    s.grp.scale.setScalar(0.4 + s.r * k); s.grp.children[0].material.opacity = (1 - k) * 0.8;
+  }
+}
+// スキル等の攻撃範囲を示す拡散リング
+const shocks = [];
+const shockRingGeo = new THREE.RingGeometry(0.86, 1.0, 40);
+function spawnShock(dir, r, color = 0xbf8aff) {
+  const grp = new THREE.Group();
+  grp.add(new THREE.Mesh(shockRingGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false })));
+  grp.position.copy(surfPos(dir, 0.2));
+  grp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+  scene.add(grp);
+  shocks.push({ grp, r, t: 0.4, max: 0.4 });
 }
 
 // ============================================================ 掉落物（コイン/ハート/ジェム）
@@ -799,8 +815,18 @@ function updateProjectiles(dt) {
 
 // プレイヤーの矢（弓）
 const arrows = [];
+const _ARROW_FWD = new THREE.Vector3(0, 0, 1), _atan = new THREE.Vector3();
+function makeArrow() {                          // +Z を進行方向とする矢
+  const g = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.9, 6), new THREE.MeshStandardMaterial({ color: 0x8a5a2a, roughness: 0.6 }));
+  shaft.rotation.x = Math.PI / 2; g.add(shaft);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.28, 6), new THREE.MeshStandardMaterial({ color: 0xdfe6ee, emissive: 0x556070, emissiveIntensity: 0.4, metalness: 0.5, roughness: 0.4 }));
+  tip.rotation.x = Math.PI / 2; tip.position.z = 0.56; g.add(tip);
+  for (const sgn of [-1, 1]) { const fl = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.18, 0.18), new THREE.MeshStandardMaterial({ color: 0xff5a5a, roughness: 0.6 })); fl.position.set(sgn * 0.04, 0, -0.42); g.add(fl); }
+  return g;
+}
 function spawnArrow() {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.1, 6), new THREE.MeshStandardMaterial({ color: 0xffe6a0, emissive: 0x8a6a22, emissiveIntensity: 0.9, roughness: 0.5 }));
+  const m = makeArrow();
   scene.add(m);
   const axis = new THREE.Vector3().crossVectors(pDir, heading);
   if (axis.lengthSq() < 1e-6) axis.crossVectors(pDir, XAXIS);
@@ -812,6 +838,8 @@ function updateArrowsP(dt) {
     const p = arrows[i]; p.life -= dt;
     p.dir.applyAxisAngle(p.axis, p.speed * dt / PLANET_R).normalize();
     p.mesh.position.copy(surfPos(p.dir, 1.4));
+    _atan.crossVectors(p.axis, p.dir).normalize();           // 進行方向(接線)
+    p.mesh.quaternion.setFromUnitVectors(_ARROW_FWD, _atan);  // 矢を進行方向へ向ける
     let hit = false;
     for (const e of enemies) {
       if (!e.alive) continue;
@@ -962,6 +990,7 @@ function doSkill() {
   skillT = SKILL_DUR; skillCD = SKILL_CD * skillCdMul * gearBonus.skillCd; invulnT = Math.max(invulnT, 0.35);
   Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
   spawnImpact(player.position.clone().addScaledVector(pDir, 1.0), 0xbf8aff, 14);
+  spawnShock(pDir.clone(), SKILL_RANGE, 0xbf8aff);   // 攻撃範囲リング
   // 周囲360°に大ダメージ
   const co = Math.cos(SKILL_RANGE / PLANET_R);
   for (const e of enemies) {
@@ -1180,6 +1209,7 @@ function spawnAoe(dir, r, dmg, color = 0xff3a3a) {
 // プレイヤー中心の即時AoEダメージ（スラム/ダッシュ斬りなど）
 function aoeDamage(r, dmg, color = 0xfff2c0) {
   spawnImpact(surfPos(pDir, 0.4), color, 16); shakeT = Math.max(shakeT, 0.28);
+  spawnShock(pDir.clone(), r, color);
   const co = Math.cos(r / PLANET_R);
   for (const e of enemies) {
     if (!e.alive) continue;
@@ -1719,7 +1749,8 @@ function update(dt, t) {
   if (skillT > 0) player.rotateOnAxis(UPVEC, (1 - skillT / SKILL_DUR) * Math.PI * 5); // スキル中はスピン
   const attackP = attackT > 0 ? (1 - attackT / ATTACK_DUR) : 0;
   playerModel.update(dt, playerMoving && jumpH < 0.1, dash ? 1.4 : 1.0, attackP);
-  player.visible = !(invulnT > 0 && Math.floor(t * 20) % 2 === 0); // 無敵中は点滅
+  player.visible = !(hurtFlash > 0 && Math.floor(t * 22) % 2 === 0); // 受傷時だけ点滅（ダッシュでは点滅しない）
+  if (dashT > 0 && Math.floor(t * 60) % 2 === 0) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x7fd8ff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); sp.position.copy(player.position).addScaledVector(_up, 1.0); sp.scale.setScalar(2.2); scene.add(sp); fxList.push({ sp, v: new THREE.Vector3(), life: 0.26, max: 0.26 }); } // ダッシュの残像トレイル
 
   // 足元マーカー（位置の目印・脈動）
   marker.position.copy(pDir).multiplyScalar(PLANET_R + 0.12);
