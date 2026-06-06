@@ -678,7 +678,7 @@ function spawnBoss(n) {
   for (const m of mats) { m.userData.be = m.emissive.clone(); }
   addOutline(e.root, 1.05);
   scene.add(e.root);
-  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, theme: themeIndex, dir: freeDir().clone(), hp, maxHp: hp, atk: BOSS_DEF.atk * planetMul, alive: true, atkCD: 2, castCD: 3, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, escale: BOSS_DEF.scale * 0.9, burn: 0, poison: 0, freeze: 0, mats };
+  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, theme: themeIndex, dir: freeDir().clone(), hp, maxHp: hp, atk: BOSS_DEF.atk * planetMul, alive: true, atkCD: 2, castCD: 3, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, escale: BOSS_DEF.scale * 0.9, burn: 0, poison: 0, freeze: 0, mats, phase: 1, enrageMul: 1, invT: 0, addCD: 7 };
   enemies.push(bossRef);
   Audio.sfx('encounter');
   document.getElementById('bossName').textContent = '◆ ' + THEMES[themeIndex].bossName + ' ◆';
@@ -850,13 +850,16 @@ function updateArrowsP(dt) {
       if (!e.alive) continue;
       const ang = Math.acos(THREE.MathUtils.clamp(p.dir.dot(e.dir), -1, 1)) * PLANET_R;
       if (ang < e.def.scale * 0.9 + 0.7) {
+        if (bossBarrier(e)) { hit = true; break; }
         const crit = Math.random() < critTotal(); let tot = crit ? p.dmg * 2 : p.dmg;
         if (e.affix === 'tough') tot = Math.round(tot * 0.6);
         e.hp -= tot; e.hitFlash = 0.18; registerHit(); if (crit) critFlash();
         if (Math.random() < 0.4) addStatus(e, 'poison', 4);   // 弓で毒
         if (relicCount('fire')) addStatus(e, 'burn', 3);
         if (relicCount('frost') && Math.random() < 0.35) addStatus(e, 'freeze', 1.5);
-        const ls = lifestealTotal(); if (ls > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * ls);
+        if (syn('fire', 'frost') && e.burn > 0 && e.freeze > 0) { const sd = 12 + hero.level * 2; e.hp -= sd; spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.4), 0x9fd0ff, 8); } // 相転移
+        let ls = lifestealTotal(); if (crit && syn('crit', 'vamp')) ls *= 2;  // 処刑
+        if (ls > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * ls);
         showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), tot, crit ? 'crit' : '');
         spawnImpact(p.mesh.position.clone(), 0xffe6a0, 5); Audio.sfx('hit');
         if (e.hp <= 0) killEnemy(e);
@@ -1000,6 +1003,7 @@ function ringDamage(r, dmg, color, knock, applyStatus) {
   for (const e of enemies) {
     if (!e.alive) continue;
     if (pDir.dot(e.dir) < co) continue;
+    if (bossBarrier(e)) continue;
     e.hp -= e.affix === 'tough' ? Math.round(dmg * 0.6) : dmg; e.hitFlash = 0.2; registerHit();
     if (applyStatus) addStatus(e, applyStatus, 3);
     if (relicCount('fire')) addStatus(e, 'burn', 3);
@@ -1035,6 +1039,7 @@ function statusTint(e) { return e.burn > 0 ? STATUS_COL.burn : e.poison > 0 ? ST
 function tickStatus(e, dt) {
   if (e.burn > 0) { e.burn -= dt; e.hp -= (6 + hero.level) * dt; if (Math.random() < dt * 3) showDmg(e.model.root.position.clone().addScaledVector(e.dir, 1.6), Math.round(6 + hero.level), ''); }
   if (e.poison > 0) { e.poison -= dt; e.hp -= (4 + hero.level * 0.6) * dt; }
+  if (e.burn > 0 && e.poison > 0 && syn('fire', 'venom')) e.hp -= (5 + hero.level * 0.5) * dt;  // 劇毒シナジー
   if (e.freeze > 0) e.freeze -= dt;
   if (e.hp <= 0) { killEnemy(e); return false; }
   return true;
@@ -1049,7 +1054,7 @@ function hurtPlayer(dmg, fromDir) {
   if (invulnT > 0 || dashT > 0) return;
   hero.hp -= dmg; invulnT = 0.7; hurtFlash = 0.4; shakeT = Math.max(shakeT, 0.25); Audio.sfx('hit');
   showDmg(player.position.clone().addScaledVector(pDir, 2.6), Math.round(dmg));
-  hitCombo = 0; comboEl.style.opacity = '0';                  // 被弾でコンボ途切れ
+  hitCombo = 0; comboEl.style.opacity = '0'; addUlt(6);       // 被弾でコンボ途切れ／ゲージは溜まる
   if (relicCount('thorn')) {                                   // 茨の鎧: 周囲反撃
     spawnShock(pDir.clone(), 6, 0xffd27a); const tco = Math.cos(6 / PLANET_R), td = 20 + hero.level * 3;
     for (const o of enemies) if (o.alive && pDir.dot(o.dir) > tco) { o.hp -= td; o.hitFlash = 0.2; spawnImpact(o.model.root.position.clone().addScaledVector(o.dir, 1), 0xffd27a, 4); if (o.hp <= 0) killEnemy(o); }
@@ -1071,10 +1076,11 @@ function killEnemy(e) {
   if (!e.alive) return;
   const em = e.elite ? 2.5 : 1;
   e.alive = false; e.dead = 0.5; gainExp(Math.round(e.def.exp * planetMul * em));
-  if (relicCount('chain')) {                                   // 連鎖爆発
-    spawnImpact(e.model.root.position.clone(), 0xffae3a, 12); spawnShock(e.dir.clone(), 5, 0xffae3a);
-    const cco = Math.cos(5 / PLANET_R), cd = 18 + hero.level * 2;
-    for (const o of enemies) if (o !== e && o.alive && e.dir.dot(o.dir) > cco) { o.hp -= cd; o.hitFlash = 0.2; if (o.hp <= 0) killEnemy(o); }
+  if (relicCount('chain')) {                                   // 連鎖爆発（過負荷シナジーで強化）
+    const over = syn('chain', 'amp'), rr = over ? 7 : 5, cd = Math.round((18 + hero.level * 2) * (over ? 1.8 : 1));
+    spawnImpact(e.model.root.position.clone(), over ? 0xff6a3a : 0xffae3a, over ? 18 : 12); spawnShock(e.dir.clone(), rr, over ? 0xff6a3a : 0xffae3a);
+    const cco = Math.cos(rr / PLANET_R);
+    for (const o of enemies) if (o !== e && o.alive && !(o.isBoss && o.invT > 0) && e.dir.dot(o.dir) > cco) { o.hp -= cd; o.hitFlash = 0.2; if (o.hp <= 0) killEnemy(o); }
   }
   score += Math.round((e.def.score || 10) * planetMul * em);
   spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.0), e.elite ? 0xffd27a : 0xffd27a, e.elite ? 18 : 10);
@@ -1294,20 +1300,62 @@ function recomputeStats() {
   moveMul = (1 + meta.move * 0.05) * c.move * Math.pow(1.12, relicCount('swift'));
   coinBonus = meta.coin + relicCount('gold');
 }
-const relicBarEl = document.getElementById('relicBar');
+const relicBarEl = document.getElementById('relicBar'), synBarEl = document.getElementById('synBar');
+// 遺物シナジー（2種同時所持で発動）
+const SYNERGIES = [
+  { a: 'fire', b: 'frost', nm: '❄🔥 相転移', ds: '燃焼かつ凍結の敵に追撃' },
+  { a: 'fire', b: 'venom', nm: '☠️ 劇毒', ds: '燃焼＋毒の継続増' },
+  { a: 'chain', b: 'amp', nm: '⚡ 過負荷', ds: '連鎖爆発が増幅' },
+  { a: 'crit', b: 'vamp', nm: '🩸 処刑', ds: '暴撃時の吸血倍化' },
+];
+function syn(a, b) { return relicCount(a) > 0 && relicCount(b) > 0; }
+function activeSyns() { return SYNERGIES.filter(s => syn(s.a, s.b)); }
 function renderRelicBar() {
   const seen = {}; relicBarEl.innerHTML = '';
   for (const k of relics) { seen[k] = (seen[k] || 0) + 1; }
   for (const k in seen) { const s = document.createElement('span'); s.textContent = RELIC_MAP[k].ic + (seen[k] > 1 ? seen[k] : ''); s.title = RELIC_MAP[k].nm; relicBarEl.appendChild(s); }
+  synBarEl.innerHTML = '';
+  for (const s of activeSyns()) { const el = document.createElement('span'); el.textContent = s.nm; el.title = s.ds; synBarEl.appendChild(el); }
 }
-function addRelic(k) { relics.push(k); recomputeStats(); renderRelicBar(); Audio.sfx('chest'); showArea(RELIC_MAP[k].nm + ' を獲得', RELIC_MAP[k].ds); }
+function addRelic(k) {
+  const before = activeSyns(); relics.push(k); recomputeStats(); renderRelicBar();
+  Audio.sfx('chest'); showArea(RELIC_MAP[k].nm + ' を獲得', RELIC_MAP[k].ds);
+  const fresh = activeSyns().filter(s => !before.includes(s));
+  if (fresh.length) setTimeout(() => showArea('シナジー: ' + fresh[0].nm, fresh[0].ds), 1000);
+}
+
+// ---- 必殺ゲージ（オーバードライブ） ----
+let ult = 0;
+const ultBarEl = document.getElementById('ultBar'), ultFillEl = ultBarEl.querySelector('i'), btnUltEl = document.getElementById('btnUlt');
+function addUlt(n) { if (ult >= 100) return; ult = Math.min(100, ult + n); updateUltUI(); }
+function updateUltUI() {
+  ultFillEl.style.width = ult + '%'; ultBarEl.classList.toggle('full', ult >= 100);
+  if (btnUltEl) { btnUltEl.classList.toggle('ready', ult >= 100); btnUltEl.classList.toggle('cool', ult < 100); }
+}
+function doUlt() {
+  if (gameState !== 'field' || ult < 100) return;
+  ult = 0; updateUltUI();
+  slowMo = Math.max(slowMo, 1.2); invulnT = Math.max(invulnT, 1.4); shakeT = Math.max(shakeT, 0.6); critFlash();
+  Audio.sfx('victory'); spawnShock(pDir.clone(), 30, 0xffd23a);
+  const dmg = Math.round((60 + hero.level * 8 + atkBonus * 3) * (1 + Math.min(hitCombo, 50) * 0.02) * skillDmgMul());
+  for (const e of enemies) {
+    if (!e.alive) continue; if (e.isBoss && e.invT > 0) continue;
+    e.hp -= dmg; e.hitFlash = 0.25; registerHit(); addStatus(e, 'burn', 4);
+    showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3.2 : 1.8), dmg, 'crit');
+    spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.2), 0xffd23a, 8);
+    if (e.hp <= 0) killEnemy(e);
+  }
+  hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.15); updateHUD();
+  showArea('OVERDRIVE!!', '必殺解放');
+}
+updateUltUI();
 
 // ---- コンボ表示 ----
 const comboEl = document.getElementById('combo'), comboNumEl = comboEl.querySelector('.cn'), comboRankEl = comboEl.querySelector('.cr');
 let hitCombo = 0, hitComboT = 0;
 function comboRank(n) { return n >= 50 ? '神業!!' : n >= 30 ? 'COOL!' : n >= 15 ? 'GREAT!' : n >= 6 ? 'GOOD!' : ''; }
 function registerHit() {
-  hitCombo++; hitComboT = 2.2;
+  hitCombo++; hitComboT = 2.2; addUlt(2);
   if (hitCombo >= 6) { score += 1; }
   comboNumEl.innerHTML = hitCombo + '<small> HIT</small>';
   comboRankEl.textContent = comboRank(hitCombo);
@@ -1421,6 +1469,7 @@ function beginRun() {
   skillSlot2 = 'shock'; healUnlocked = false;
   score = 0; coins = 0; planetMul = 1; themeIndex = 0; applyTheme(0);
   relics = []; forceElite = 0; pendingAfterShop = false; hitCombo = 0; hitComboT = 0; comboEl.style.opacity = '0';
+  ult = 0; updateUltUI();
   applyMeta();                          // メタ強化を反映（HP/攻撃/移動/弓/復活/金運）
   applyClass();                         // 職業を反映（HP/攻撃/弓/暴撃/CD/スキル2）
   recomputeStats(); renderRelicBar();   // 遺物（最初は空）込みで再計算
@@ -1517,21 +1566,51 @@ function updateAoes(dt) {
     }
   }
 }
-// 惑星ごとのボス必殺技
+// 惑星ごとのボス必殺技（フェーズで強化）
 function bossCast(e) {
-  const dmg = Math.round(e.atk);
-  if (e.theme === 1) {            // 雪: 3方向の氷弾
+  const ph = e.phase || 1, dmg = Math.round(e.atk * (1 + 0.15 * (ph - 1)));
+  if (e.theme === 1) {            // 雪: 氷弾（P2で5方向）
     Audio.sfx('skill');
-    for (const off of [-0.4, 0, 0.4]) spawnProjectile(e.dir.clone(), pDir.clone().applyAxisAngle(e.dir, off).normalize(), dmg);
-  } else if (e.theme === 2) {     // 溶岩: 複数の地割れAOE
+    const offs = ph >= 2 ? [-0.6, -0.3, 0, 0.3, 0.6] : [-0.4, 0, 0.4];
+    for (const off of offs) spawnProjectile(e.dir.clone(), pDir.clone().applyAxisAngle(e.dir, off).normalize(), dmg);
+  } else if (e.theme === 2) {     // 溶岩: 地割れAOE（P2で追加）
     spawnAoe(pDir.clone(), 5.4, Math.round(dmg * 1.2));
     spawnAoe(freeDir(false), 4.4, dmg);
-  } else if (e.theme === 3) {     // 異界: 放射弾幕
+    if (ph >= 2) spawnAoe(freeDir(false), 4.4, dmg);
+  } else if (e.theme === 3) {     // 異界: 放射弾幕（P2で密度↑）
     Audio.sfx('skill');
-    for (let i = 0; i < 8; i++) spawnProjectile(e.dir.clone(), pDir.clone().applyAxisAngle(e.dir, i / 8 * Math.PI * 2).normalize(), dmg);
-  } else {                        // 草原: 単発AOE
+    const cnt = ph >= 2 ? 12 : 8;
+    for (let i = 0; i < cnt; i++) spawnProjectile(e.dir.clone(), pDir.clone().applyAxisAngle(e.dir, i / cnt * Math.PI * 2).normalize(), dmg);
+  } else {                        // 草原: 単発AOE（P2で追加）
     spawnAoe(pDir.clone(), 5.0, Math.round(dmg * 1.1));
+    if (ph >= 2) spawnAoe(freeDir(false), 4.0, dmg);
   }
+  if (ph >= 3) {                  // フェーズ3共通: 全方位の追撃弾幕
+    for (let i = 0; i < 10; i++) spawnProjectile(e.dir.clone(), pDir.clone().applyAxisAngle(e.dir, i / 10 * Math.PI * 2 + 0.3).normalize(), Math.round(dmg * 0.8));
+  }
+}
+// ボスの雑魚召喚
+function summonAdds(e, n) {
+  const pool = THEMES[e.theme].pool;
+  for (let i = 0; i < n; i++) {
+    _axis.crossVectors(e.dir, randDir()).normalize();
+    const d = e.dir.clone().applyAxisAngle(_axis, 0.18 + Math.random() * 0.12).normalize();
+    spawnEnemyDef(pool[Math.floor(Math.random() * pool.length)], d, 0.6, 0.8, true);
+  }
+  spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1), 0x9a6aff, 12);
+}
+// ボスのフェーズ移行（怒り・無敵バリア・召喚・バースト）
+function enterBossPhase(e, p) {
+  e.phase = p; e.enrageMul = p >= 3 ? 1.7 : 1.3; e.invT = 1.0; e.castCD = 0.5;
+  shakeT = Math.max(shakeT, 0.6); slowMo = Math.max(slowMo, 0.5); hurtFlash = Math.max(hurtFlash, 0.15);
+  spawnShock(e.dir.clone(), 7, 0xff5a3a); spawnImpact(e.model.root.position.clone(), 0xff5a3a, 24); Audio.sfx('encounter');
+  showArea('PHASE ' + p + ' — 怒り', THEMES[e.theme].bossName);
+  summonAdds(e, p >= 3 ? 3 : 2); bossCast(e);
+}
+// フェーズ移行中の無敵バリア（ダメージ無効＋演出）
+function bossBarrier(e) {
+  if (e.isBoss && e.invT > 0) { e.hitFlash = 0.1; spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.6), 0xff5a3a, 4); showDmg(e.model.root.position.clone().addScaledVector(e.dir, 3.2), 'GUARD'); return true; }
+  return false;
 }
 
 // ============================================================ セーブ（最高記録）
@@ -1599,6 +1678,7 @@ addEventListener('keydown', e => {
   else if (k === 'k') { doDash(); }
   else if (k === 'l') { doSkill(1); }
   else if (k === 'u') { doSkill(2); }
+  else if (k === 'q') { doUlt(); }
   else if (k === 'r') { switchWeapon(); }
   else if (k === 't') { openTree(); }
   else if (k === 'f' || k === 'enter') { interact(); e.preventDefault(); }
@@ -1622,6 +1702,7 @@ function bindBtn(btn, fn) {
 bindBtn(btnA, actionA); bindBtn(btnJump, doJump); bindBtn(btnDash, doDash);
 bindBtn(btnWep, switchWeapon); bindBtn(btnTree, openTree);
 bindBtn(btnSkill, () => doSkill(1)); bindBtn(btnSkill2, () => doSkill(2)); bindBtn(btnPause, togglePause);
+bindBtn(document.getElementById('btnUlt'), doUlt);
 
 // デスクトップ: クリックで 会話送り or 攻撃
 addEventListener('pointerdown', e => {
@@ -1898,6 +1979,7 @@ function combatUpdate(dt, t) {
       const d = pDir.dot(e.dir); if (d < co) continue;
       _md.copy(e.dir).addScaledVector(pDir, -d);
       if (_md.lengthSq() < 1e-6 || _md.normalize().dot(heading) < cone) continue;
+      if (bossBarrier(e)) continue;
       let dmg = 8 + hero.level * 2 + atkBonus + gearBonus.atk + Math.floor(Math.random() * 5);
       if (comboHeavy) dmg = Math.floor(dmg * 1.8);
       if (dashAttack) dmg = Math.floor(dmg * 1.4);
@@ -1908,7 +1990,9 @@ function combatUpdate(dt, t) {
       if (relicCount('fire')) addStatus(e, 'burn', 3);
       if (relicCount('venom')) addStatus(e, 'poison', 4);
       if (relicCount('frost') && Math.random() < 0.35) addStatus(e, 'freeze', 1.5);
-      const ls = lifestealTotal(); if (ls > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * ls);
+      if (syn('fire', 'frost') && e.burn > 0 && e.freeze > 0) { const sd = 12 + hero.level * 2; e.hp -= sd; spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.4), 0x9fd0ff, 8); showDmg(e.model.root.position.clone().addScaledVector(e.dir, 2.4), sd, 'crit'); } // 相転移
+      let ls = lifestealTotal(); if (crit && syn('crit', 'vamp')) ls *= 2;  // 処刑: 暴撃吸血倍化
+      if (ls > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * ls);
       if (crit || comboHeavy) { hitStop = Math.max(hitStop, crit ? 0.07 : 0.05); critFlash(); } // 顿帧+闪光
       showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3.2 : 1.8), tot, crit ? 'crit' : '');
       spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 2.2 : 1.2), 0xfff2c0, crit ? 8 : 5);
@@ -1933,8 +2017,14 @@ function combatUpdate(dt, t) {
     const d = THREE.MathUtils.clamp(pDir.dot(e.dir), -1, 1);
     const angDist = Math.acos(d) * PLANET_R;
     const bh = e.def.behavior;
-    const frz = (e.freeze > 0 ? 0.4 : 1) * ((e.affix === 'enrage' && e.hp < e.maxHp * 0.4) ? 1.7 : 1); // 凍結減速 / 狂暴加速
-    if (e.isBoss) { e.castCD = (e.castCD || 3) - dt; if (e.castCD <= 0 && angDist < 22) { e.castCD = 4.2; bossCast(e); } }
+    const frz = (e.freeze > 0 ? 0.4 : 1) * ((e.affix === 'enrage' && e.hp < e.maxHp * 0.4) ? 1.7 : 1) * (e.enrageMul || 1); // 凍結減速 / 狂暴・怒り加速
+    if (e.isBoss) {
+      if (e.invT > 0) e.invT -= dt;
+      if (e.phase < 2 && e.hp <= e.maxHp * 0.66) enterBossPhase(e, 2);        // フェーズ移行
+      else if (e.phase < 3 && e.hp <= e.maxHp * 0.33) enterBossPhase(e, 3);
+      e.castCD = (e.castCD || 3) - dt; if (e.castCD <= 0 && angDist < 24) { e.castCD = 4.2 / e.enrageMul; bossCast(e); }
+      if (e.phase >= 3) { e.addCD -= dt; if (e.addCD <= 0) { e.addCD = 7; summonAdds(e, 2); } } // 終盤は雑魚召喚
+    }
     if (angDist < e.def.aggro) {
       if (bh === 'caster') {                              // 詠唱: 距離を取りつつ弾を撃つ
         const want = e.def.atkRange * 0.55;

@@ -113,6 +113,10 @@
     #btnSkill { right: 118px; bottom: 178px; background: radial-gradient(circle at 38% 34%, rgba(206,150,235,.95), rgba(120,70,165,.92)); }
     #btnSkill2 { right: 36px; bottom: 268px; width: 54px; height: 54px; font-size: 12px; background: radial-gradient(circle at 38% 34%, rgba(150,180,235,.95), rgba(70,100,170,.92)); }
     #btnWep { left: 14px; bottom: 188px; width: 54px; height: 54px; font-size: 11px; background: radial-gradient(circle at 38% 34%, rgba(230,200,140,.95), rgba(150,110,60,.92)); }
+    #btnUlt { right: 92px; bottom: 264px; width: 60px; height: 60px; font-size: 13px; background: radial-gradient(circle at 38% 34%, rgba(255,224,130,.98), rgba(210,140,40,.95)); box-shadow: 0 0 0 2px rgba(255,255,255,.25) inset, 0 6px 16px rgba(0,0,0,.45); }
+    #btnUlt.ready { animation: ultpulse 1s ease-in-out infinite; }
+    #btnUlt.cool { opacity: .4; animation: none; }
+    @keyframes ultpulse { 0%,100% { box-shadow: 0 0 0 2px rgba(255,255,255,.25) inset, 0 0 10px 2px rgba(255,210,90,.6); } 50% { box-shadow: 0 0 0 2px rgba(255,255,255,.5) inset, 0 0 22px 8px rgba(255,210,90,.95); } }
     #btnTree { left: 14px; bottom: 252px; width: 54px; height: 54px; font-size: 18px; background: radial-gradient(circle at 38% 34%, rgba(150,220,160,.95), rgba(70,140,90,.92)); }
 
     /* 被弾の赤フラッシュ */
@@ -191,9 +195,19 @@
     #combo .cn small { font-size: 17px; }
     #combo .cr { font-size: 14px; letter-spacing: .14em; color: #ffd27a; text-shadow: 0 2px 6px #000; }
 
+    /* 必殺ゲージ */
+    #ultBar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 7; width: 200px; max-width: 56vw; height: 10px;
+      border-radius: 6px; background: rgba(10,14,26,.7); border: 1px solid rgba(255,255,255,.18); overflow: hidden; pointer-events: none; }
+    #ultBar > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #ff9a3a, #ffe07a); transition: width .12s; }
+    #ultBar.full > i { background: linear-gradient(90deg, #ffd23a, #fff7c8, #ffd23a); animation: ultflow 1s linear infinite; }
+    #ultBar .lbl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 700 8px ui-monospace, monospace; letter-spacing: .2em; color: #fff; text-shadow: 0 1px 2px #000; }
+    @keyframes ultflow { 0% { filter: brightness(1); } 50% { filter: brightness(1.4); } 100% { filter: brightness(1); } }
+
     /* 遺物バー */
     #relicBar { position: fixed; left: 12px; top: 92px; z-index: 7; display: flex; gap: 4px; flex-wrap: wrap; max-width: 160px; pointer-events: none; }
     #relicBar span { font-size: 17px; filter: drop-shadow(0 1px 2px #000); }
+    #synBar { position: fixed; left: 12px; top: 124px; z-index: 7; display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
+    #synBar span { font: 700 10px ui-monospace, monospace; color: #ffe6a8; background: rgba(40,30,10,.55); border: 1px solid rgba(255,210,110,.4); border-radius: 6px; padding: 1px 6px; text-shadow: 0 1px 2px #000; }
     .luCard { width: 168px; padding: 16px 14px; border-radius: 12px; cursor: pointer; pointer-events: auto;
       background: linear-gradient(180deg, rgba(30,36,58,.96), rgba(16,20,34,.97)); border: 2px solid rgba(255,210,130,.5); color: #eaf2ff; text-align: center; }
     .luCard:hover, .luCard.sel { border-color: #ffd27a; background: rgba(255,210,130,.18); transform: translateY(-2px); }
@@ -331,11 +345,14 @@
   <button id="btnDash" class="actBtn gfont">DASH</button>
   <button id="btnSkill" class="actBtn gfont">SKILL</button>
   <button id="btnSkill2" class="actBtn gfont">SK2</button>
+  <button id="btnUlt" class="actBtn gfont">必殺</button>
+  <div id="ultBar"><i></i><div class="lbl">OVERDRIVE</div></div>
   <button id="btnWep" class="actBtn gfont">⚔弓</button>
   <button id="btnTree" class="actBtn gfont">🌳</button>
   <button id="btnPause" class="gfont">⏸</button>
   <div id="combo"><div class="cn"></div><div class="cr"></div></div>
   <div id="relicBar"></div>
+  <div id="synBar"></div>
   <div id="hint" class="gfont"></div>
 
   <div id="hud" class="gfont">
