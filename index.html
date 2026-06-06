@@ -111,6 +111,7 @@
     #btnJump { right: 110px; bottom: 92px; }
     #btnDash { right: 30px; bottom: 196px; background: radial-gradient(circle at 38% 34%, rgba(120,200,170,.95), rgba(50,120,95,.92)); }
     #btnSkill { right: 118px; bottom: 178px; background: radial-gradient(circle at 38% 34%, rgba(206,150,235,.95), rgba(120,70,165,.92)); }
+    #btnSkill2 { right: 36px; bottom: 268px; width: 54px; height: 54px; font-size: 12px; background: radial-gradient(circle at 38% 34%, rgba(150,180,235,.95), rgba(70,100,170,.92)); }
     #btnWep { left: 14px; bottom: 188px; width: 54px; height: 54px; font-size: 11px; background: radial-gradient(circle at 38% 34%, rgba(230,200,140,.95), rgba(150,110,60,.92)); }
     #btnTree { left: 14px; bottom: 252px; width: 54px; height: 54px; font-size: 18px; background: radial-gradient(circle at 38% 34%, rgba(150,220,160,.95), rgba(70,140,90,.92)); }
 
@@ -149,14 +150,31 @@
     #warpArrow { color: #7fe0ff; } #bossArrow { color: #ff6a6a; }
 
     /* レベルアップ / 商店 / スキルツリー / 結果（縦に長くてもスクロールで全部届く） */
-    #levelup, #shop, #skilltree, #gameover { position: fixed; inset: 0; z-index: 16; display: none; flex-direction: column; align-items: center; justify-content: flex-start; gap: 14px;
+    #levelup, #shop, #skilltree, #gameover, #metashop, #pause { position: fixed; inset: 0; z-index: 16; display: none; flex-direction: column; align-items: center; justify-content: flex-start; gap: 14px;
       padding: 5vh 10px calc(5vh + 80px); overflow-y: auto; -webkit-overflow-scrolling: touch;
       background: rgba(6,8,16,.72); backdrop-filter: blur(4px); font-family: ui-monospace, monospace; }
-    #levelup h2, #shop h2, #skilltree h2, #gameover h2 { color: #ffd27a; letter-spacing: .2em; font-size: 19px; text-shadow: 0 2px 10px #000; }
-    #luOpts, #shopItems, #treeNodes { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 94vw; }
+    #levelup h2, #shop h2, #skilltree h2, #gameover h2, #metashop h2, #pause h2 { color: #ffd27a; letter-spacing: .2em; font-size: 19px; text-shadow: 0 2px 10px #000; }
+    #luOpts, #shopItems, #treeNodes, #metaItems { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 94vw; }
     #gameover .res { color: #eaf2ff; font-size: 14px; line-height: 1.9; text-align: center; }
     #gameover .lb { color: #cdd6e8; font-size: 12px; line-height: 1.7; text-align: center; min-width: 200px; }
     #gameover .lb b { color: #ffd27a; }
+    #pause .res { color: #eaf2ff; font-size: 13px; text-align: center; }
+    #pause input[type=range] { width: 160px; accent-color: #ffce6e; vertical-align: middle; }
+
+    /* ポーズボタン */
+    #btnPause { position: fixed; right: 14px; top: 12px; z-index: 10; width: 40px; height: 40px; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,.25); background: rgba(20,24,38,.7); color: #eaf2ff; font-size: 16px; pointer-events: auto; display: none; }
+    body.touch #btnPause { display: block; }
+
+    /* タイトル画面 */
+    #title { position: fixed; inset: 0; z-index: 22; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+      background: radial-gradient(ellipse at 50% 30%, #1a2murky 0%, #070a14 75%); background: radial-gradient(ellipse at 50% 35%, #20305a 0%, #070a14 78%);
+      font-family: ui-monospace, monospace; overflow-y: auto; padding: 4vh 0; }
+    #title h1 { color: #ffe6a8; font-size: 40px; letter-spacing: .12em; text-align: center; line-height: 1.05; text-shadow: 0 4px 24px rgba(255,180,80,.5); margin-bottom: 4px; }
+    #title .tsub { color: #9fb8e0; font-size: 13px; letter-spacing: .2em; margin-bottom: 18px; }
+    #titleBtns { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+    #titleBtns .luCard { width: 220px; }
+    #titleInfo { color: #cdd6e8; font-size: 12px; line-height: 1.7; text-align: center; margin-top: 14px; white-space: pre-wrap; max-width: 90vw; }
     .luCard { width: 168px; padding: 16px 14px; border-radius: 12px; cursor: pointer; pointer-events: auto;
       background: linear-gradient(180deg, rgba(30,36,58,.96), rgba(16,20,34,.97)); border: 2px solid rgba(255,210,130,.5); color: #eaf2ff; text-align: center; }
     .luCard:hover, .luCard.sel { border-color: #ffd27a; background: rgba(255,210,130,.18); transform: translateY(-2px); }
@@ -293,8 +311,10 @@
   <button id="btnJump" class="actBtn gfont">JUMP</button>
   <button id="btnDash" class="actBtn gfont">DASH</button>
   <button id="btnSkill" class="actBtn gfont">SKILL</button>
+  <button id="btnSkill2" class="actBtn gfont">SK2</button>
   <button id="btnWep" class="actBtn gfont">⚔弓</button>
   <button id="btnTree" class="actBtn gfont">🌳</button>
+  <button id="btnPause" class="gfont">⏸</button>
   <div id="hint" class="gfont"></div>
 
   <div id="hud" class="gfont">
@@ -348,7 +368,20 @@
   <div id="levelup"><h2>LEVEL UP — 祝福を選べ</h2><div id="luOpts"></div></div>
   <div id="shop"><h2>🛒 行商人のみせ <span id="shopCoins"></span></h2><div id="shopItems"></div><div id="shopClose" class="luCard">とじる</div></div>
   <div id="skilltree"><h2>🌳 スキルツリー <span id="treeSP"></span></h2><div id="treeNodes"></div><div id="treeClose" class="luCard">とじる</div></div>
-  <div id="gameover"><h2 id="goTitle">GAME OVER</h2><div class="res" id="goRes"></div><div class="lb" id="goBoard"></div><div id="goRestart" class="luCard">もう一度</div></div>
+  <div id="gameover"><h2 id="goTitle">GAME OVER</h2><div class="res" id="goRes"></div><div class="lb" id="goBoard"></div><div class="res" id="goMeta" style="color:#7fe0ff"></div><div id="goMetaBtn" class="luCard">💎 永久強化</div><div id="goRestart" class="luCard">もう一度</div><div id="goTitleBtn" class="luCard">タイトルへ</div></div>
+  <div id="metashop"><h2>💎 永久強化 <span id="metaGems"></span></h2><div id="metaItems"></div><div id="metaClose" class="luCard">もどる</div></div>
+  <div id="pause"><h2>PAUSE</h2><div class="res">BGM音量 <input id="volSlider" type="range" min="0" max="1" step="0.05" value="1"></div><div id="pauseResume" class="luCard">つづける</div><div id="pauseMeta" class="luCard">💎 永久強化</div><div id="pauseTitle" class="luCard">タイトルへ</div></div>
+
+  <div id="title">
+    <h1>PLANET<br>RAIDER</h1>
+    <div class="tsub">めぐる小さな星のアクション</div>
+    <div id="titleBtns">
+      <div id="tStart" class="luCard">▶ はじめる</div>
+      <div id="tMeta" class="luCard">💎 永久強化</div>
+      <div id="tHelp" class="luCard">？ あそびかた</div>
+    </div>
+    <div id="titleInfo"></div>
+  </div>
   <div id="bossbar" class="gfont">
     <div class="nm" id="bossName"></div>
     <div class="bbar"><i id="bossHp"></i></div>

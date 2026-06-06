@@ -651,18 +651,22 @@ function freeDir(awayFromPlayer = true) {
   for (let k = 0; k < 24; k++) { d = randDir(); if ((!awayFromPlayer || pDir.dot(d) < 0.5) && !nearObstacle(d, 0.05)) break; }
   return d;
 }
-function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1) {
+const ELITE_AFFIX = ['tough', 'enrage', 'split'];
+function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1, isChild = false) {
   const def = ENEMY_DEF[key];
+  const elite = !isChild && wave >= 2 && Math.random() < 0.14;   // 精英怪
   const e = M.makeEnemy(def.model);
-  e.root.scale.setScalar(def.scale * childScale);
-  const tint = def.tint || (def.noTint ? null : THEMES[themeIndex].enemyTint);   // 種類色 or 惑星色（専属モデルは無着色）
+  const escale = def.scale * childScale * (elite ? 1.45 : 1);
+  e.root.scale.setScalar(escale);
+  const tint = def.tint || (def.noTint ? null : THEMES[themeIndex].enemyTint);
   if (tint) e.root.traverse(o => { if (o.isMesh && o.material && o.material.color) o.material.color.set(tint); });
   const mats = collectMats(e.root);
-  for (const m of mats) { m.emissive.copy(m.color).multiplyScalar(0.45); m.emissiveIntensity = 0.7; m.userData.be = m.emissive.clone(); } // 夜でも見える自発光
+  for (const m of mats) { m.emissive.copy(m.color).multiplyScalar(elite ? 0.7 : 0.45); m.emissiveIntensity = elite ? 1.0 : 0.7; m.userData.be = m.emissive.clone(); }
   addOutline(e.root, 1.07);
   scene.add(e.root);
-  const hp = def.hp * hpScale * planetMul;
-  const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp, maxHp: hp, atk: def.atk * planetMul, alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats, childScale };
+  const hp = def.hp * hpScale * planetMul * (elite ? 2.6 : 1);
+  const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp, maxHp: hp, atk: def.atk * planetMul * (elite ? 1.5 : 1), alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats, childScale, escale, elite, affix: elite ? ELITE_AFFIX[Math.floor(Math.random() * ELITE_AFFIX.length)] : null, burn: 0, poison: 0, freeze: 0 };
+  if (elite) { const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffd27a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 })); aura.scale.setScalar(3.2); aura.position.y = e.height ? e.height * 0.5 : 1; e.root.add(aura); }
   enemies.push(en); return en;
 }
 function spawnBoss(n) {
@@ -673,7 +677,7 @@ function spawnBoss(n) {
   for (const m of mats) { m.userData.be = m.emissive.clone(); }
   addOutline(e.root, 1.05);
   scene.add(e.root);
-  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, theme: themeIndex, dir: freeDir().clone(), hp, maxHp: hp, atk: BOSS_DEF.atk * planetMul, alive: true, atkCD: 2, castCD: 3, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, mats };
+  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, theme: themeIndex, dir: freeDir().clone(), hp, maxHp: hp, atk: BOSS_DEF.atk * planetMul, alive: true, atkCD: 2, castCD: 3, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, escale: BOSS_DEF.scale * 0.9, burn: 0, poison: 0, freeze: 0, mats };
   enemies.push(bossRef);
   Audio.sfx('encounter');
   document.getElementById('bossName').textContent = '◆ ' + THEMES[themeIndex].bossName + ' ◆';
@@ -749,7 +753,7 @@ function dropPickup(type, dir, data) {
   pickups.push({ obj, type, data, dir: dir.clone().normalize(), t: Math.random() * 9, life: type === 'gear' ? 26 : 16 });
 }
 function collectPickup(type, data) {
-  if (type === 'coin') { coins++; score += 5; Audio.sfx('cursor'); }
+  if (type === 'coin') { coins += 1 + coinBonus; score += 5; Audio.sfx('cursor'); }
   else if (type === 'heart') { hero.hp = Math.min(hero.maxHp, hero.hp + 18); Audio.sfx('heal'); showDmg(player.position.clone().addScaledVector(_up, 2.6), 18, 'heal'); }
   else if (type === 'gear') { gotGear(data); }
   else { gainExp(6); score += 3; Audio.sfx('cursor'); }
@@ -845,8 +849,10 @@ function updateArrowsP(dt) {
       if (!e.alive) continue;
       const ang = Math.acos(THREE.MathUtils.clamp(p.dir.dot(e.dir), -1, 1)) * PLANET_R;
       if (ang < e.def.scale * 0.9 + 0.7) {
-        const crit = Math.random() < 0.2 + gearBonus.crit, tot = crit ? p.dmg * 2 : p.dmg;
+        const crit = Math.random() < 0.2 + gearBonus.crit; let tot = crit ? p.dmg * 2 : p.dmg;
+        if (e.affix === 'tough') tot = Math.round(tot * 0.6);
         e.hp -= tot; e.hitFlash = 0.18;
+        if (Math.random() < 0.4) addStatus(e, 'poison', 4);   // 弓で毒
         if (gearBonus.lifesteal > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * gearBonus.lifesteal);
         showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), tot, crit ? 'crit' : '');
         spawnImpact(p.mesh.position.clone(), 0xffe6a0, 5); Audio.sfx('hit');
@@ -919,11 +925,10 @@ function showDmg(worldPos, val, cls = '') {
 const hudHp = document.getElementById('hudHp'), hudHpTxt = document.getElementById('hudHpTxt'), hudLv = document.getElementById('hudLv'), hudExp = document.getElementById('hudExp');
 const hudWave = document.getElementById('hudWave'), hudScore = document.getElementById('hudScore'), hudCoins = document.getElementById('hudCoins'), hudCd = document.getElementById('hudCd');
 function updateCooldownUI() {
-  // ボタンに残りCDを表示＋クールダウン中は暗く
-  if (btnSkill) { const c = skillT > 0 || skillCD > 0; btnSkill.classList.toggle('cool', c); btnSkill.textContent = skillCD > 0 ? skillCD.toFixed(1) : 'SKILL'; }
+  if (btnSkill) { btnSkill.classList.toggle('cool', skillCD > 0); btnSkill.textContent = skillCD > 0 ? skillCD.toFixed(1) : '旋'; }
+  if (btnSkill2) { btnSkill2.classList.toggle('cool', skill2CD > 0); btnSkill2.textContent = skill2CD > 0 ? skill2CD.toFixed(1) : (skillSlot2 === 'heal' ? '癒' : '波'); }
   if (btnDash) { btnDash.classList.toggle('cool', dashCD > 0); btnDash.textContent = dashCD > 0 ? dashCD.toFixed(1) : 'DASH'; }
-  // HUD読数（PCでも見える）
-  hudCd.textContent = `スキル ${skillCD > 0 ? skillCD.toFixed(1) + 's' : 'READY'} ・ ダッシュ ${dashCD > 0 ? dashCD.toFixed(1) + 's' : 'READY'}`;
+  hudCd.textContent = `旋斬 ${skillCD > 0 ? skillCD.toFixed(1) : '✓'} ・ ${skillSlot2 === 'heal' ? '治癒' : '衝撃'} ${skill2CD > 0 ? skill2CD.toFixed(1) : '✓'} ・ 回避 ${dashCD > 0 ? dashCD.toFixed(1) : '✓'}`;
 }
 function updateHUD() {
   hudHp.style.width = Math.max(0, hero.hp / hero.maxHp * 100) + '%';
@@ -951,6 +956,7 @@ let comboCount = 0, comboTimer = 0, comboHeavy = false, pendingLand = false;
 let skillT = 0, skillCD = 0;
 let atkBonus = 0, moveMul = 1, atkCdMul = 1, dashCdMul = 1, skillCdMul = 1;
 let skillPoints = 0, weapon = 'sword', bowUnlocked = false, bowPower = 0;
+let skill2CD = 0, skillSlot2 = 'shock', healUnlocked = false;
 let airSlam = false, dashAttack = false;                 // 連段派生
 let gravMul = 1, hazardTimer = 0, regenT = 0;            // 各星の機構
 let equippedGear = null;                                  // 装備
@@ -985,24 +991,49 @@ function switchWeapon() {
   weapon = weapon === 'sword' ? 'bow' : 'sword'; Audio.sfx('cursor');
   showArea(weapon === 'bow' ? '弓に持ち替えた' : '剣に持ち替えた', weapon.toUpperCase());
 }
-function doSkill() {
-  if (gameState !== 'field' || skillCD > 0) return;
-  skillT = SKILL_DUR; skillCD = SKILL_CD * skillCdMul * gearBonus.skillCd; invulnT = Math.max(invulnT, 0.35);
-  Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
-  spawnImpact(player.position.clone().addScaledVector(pDir, 1.0), 0xbf8aff, 14);
-  spawnShock(pDir.clone(), SKILL_RANGE, 0xbf8aff);   // 攻撃範囲リング
-  // 周囲360°に大ダメージ
-  const co = Math.cos(SKILL_RANGE / PLANET_R);
+function ringDamage(r, dmg, color, knock, applyStatus) {
+  spawnShock(pDir.clone(), r, color);
+  const co = Math.cos(r / PLANET_R);
   for (const e of enemies) {
     if (!e.alive) continue;
     if (pDir.dot(e.dir) < co) continue;
-    const dmg = 22 + hero.level * 3 + atkBonus * 2 + gearBonus.atk * 2;
-    e.hp -= dmg; e.hitFlash = 0.2;
-    showDmg(e.model.root.position.clone().addScaledVector(e.dir, 1.8), dmg, 'crit');
-    spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.2), 0xbf8aff, 5);
-    _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.12).normalize();
+    e.hp -= e.affix === 'tough' ? Math.round(dmg * 0.6) : dmg; e.hitFlash = 0.2;
+    if (applyStatus) addStatus(e, applyStatus, 3);
+    showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), dmg, 'crit');
+    spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.2), color, 5);
+    if (!e.isBoss) { _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -knock).normalize(); }
     if (e.hp <= 0) killEnemy(e);
   }
+}
+function castSpin() {   // 旋回斬り: 中範囲・高火力・灼熱
+  skillT = SKILL_DUR; invulnT = Math.max(invulnT, 0.35); Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
+  spawnImpact(player.position.clone().addScaledVector(pDir, 1.0), 0xbf8aff, 14);
+  ringDamage(SKILL_RANGE, 22 + hero.level * 3 + atkBonus * 2 + gearBonus.atk * 2, 0xbf8aff, 0.12, 'burn');
+}
+function castShock() {  // 衝撃波: 広範囲・低火力・大ノックバック
+  Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
+  ringDamage(7.5, 14 + hero.level * 2 + atkBonus + gearBonus.atk, 0x7fd8ff, 0.3, 'freeze');
+}
+function castHeal() {   // 治癒: 大回復＋短い無敵
+  Audio.sfx('heal'); const h = Math.round(hero.maxHp * 0.35);
+  hero.hp = Math.min(hero.maxHp, hero.hp + h); invulnT = Math.max(invulnT, 1.0);
+  spawnShock(pDir.clone(), 3, 0x7ef0a0); showDmg(player.position.clone().addScaledVector(_up, 2.6), h, 'heal'); updateHUD();
+}
+function doSkill(n = 1) {
+  if (gameState !== 'field') return;
+  if (n === 1) { if (skillCD > 0) return; skillCD = SKILL_CD * skillCdMul * gearBonus.skillCd; castSpin(); }
+  else { if (skill2CD > 0) return; skill2CD = (skillSlot2 === 'heal' ? 8 : 4) * skillCdMul * gearBonus.skillCd; (skillSlot2 === 'heal' ? castHeal : castShock)(); }
+}
+// ---- 状態異常 ----
+const STATUS_COL = { burn: 0xff6a20, poison: 0x7ad04a, freeze: 0x7fd8ff };
+function addStatus(e, type, dur) { if (!e || !e.alive) return; e[type] = Math.max(e[type] || 0, dur); }
+function statusTint(e) { return e.burn > 0 ? STATUS_COL.burn : e.poison > 0 ? STATUS_COL.poison : e.freeze > 0 ? STATUS_COL.freeze : null; }
+function tickStatus(e, dt) {
+  if (e.burn > 0) { e.burn -= dt; e.hp -= (6 + hero.level) * dt; if (Math.random() < dt * 3) showDmg(e.model.root.position.clone().addScaledVector(e.dir, 1.6), Math.round(6 + hero.level), ''); }
+  if (e.poison > 0) { e.poison -= dt; e.hp -= (4 + hero.level * 0.6) * dt; }
+  if (e.freeze > 0) e.freeze -= dt;
+  if (e.hp <= 0) { killEnemy(e); return false; }
+  return true;
 }
 function doJump() {
   if (gameState === 'field' && grounded) { jumpV = JUMP_V; grounded = false; Audio.sfx('cursor'); }
@@ -1016,7 +1047,10 @@ function hurtPlayer(dmg, fromDir) {
   showDmg(player.position.clone().addScaledVector(pDir, 2.6), Math.round(dmg));
   if (fromDir) { _axis.crossVectors(pDir, fromDir).normalize(); pDir.applyAxisAngle(_axis, -0.05).normalize(); }
   updateHUD();
-  if (hero.hp <= 0) gameOver(false);
+  if (hero.hp <= 0) {
+    if (reviveTokens > 0) { reviveTokens--; hero.hp = hero.maxHp; invulnT = 2.5; shakeT = 0.4; spawnImpact(surfPos(pDir, 0.6), 0x7ef0a0, 16); showArea('復活の翼！ 残り' + reviveTokens, 'REVIVE'); updateHUD(); }
+    else gameOver(false);
+  }
 }
 function respawnPlayer() {
   saveBest();
@@ -1026,14 +1060,25 @@ function respawnPlayer() {
 }
 function killEnemy(e) {
   if (!e.alive) return;
-  e.alive = false; e.dead = 0.5; gainExp(Math.round(e.def.exp * planetMul));
-  score += Math.round((e.def.score || 10) * planetMul);
-  spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.0), 0xffd27a, 10);
+  const em = e.elite ? 2.5 : 1;
+  e.alive = false; e.dead = 0.5; gainExp(Math.round(e.def.exp * planetMul * em));
+  score += Math.round((e.def.score || 10) * planetMul * em);
+  spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.0), e.elite ? 0xffd27a : 0xffd27a, e.elite ? 18 : 10);
   // 掉落
   dropPickup('coin', e.dir);
-  if (Math.random() < 0.26) dropPickup('heart', e.dir);
+  if (e.elite) for (let i = 0; i < 3; i++) dropPickup('coin', e.dir);
+  if (Math.random() < (e.elite ? 0.6 : 0.26)) dropPickup('heart', e.dir);
   if (Math.random() < 0.5) dropPickup('gem', e.dir);
-  if (Math.random() < 0.05) dropPickup('gear', e.dir, rollGear(1 + (Math.random() < 0.3 ? 1 : 0)));
+  if (e.elite) dropPickup('gear', e.dir, rollGear(2));        // 精英は確定で装備
+  else if (Math.random() < 0.05) dropPickup('gear', e.dir, rollGear(1 + (Math.random() < 0.3 ? 1 : 0)));
+  // 分裂（種別 or 精英词缀）
+  if ((e.def.behavior === 'split' || e.affix === 'split') && !e.isChild) {
+    for (let i = 0; i < 2; i++) {
+      _axis.crossVectors(e.dir, randDir()).normalize();
+      const cd = e.dir.clone().applyAxisAngle(_axis, 0.08).normalize();
+      spawnEnemyDef('slime', cd, 0.5, 0.75, true);
+    }
+  }
   if (e.isBoss) {
     bossRef = null; bossbarEl.style.display = 'none'; slowMo = 1.0;
     dropPickup('gear', e.dir, rollGear(2 + (Math.random() < 0.4 ? 1 : 0)));   // ボスは確定で良装備
@@ -1043,14 +1088,6 @@ function killEnemy(e) {
     if (e.theme === 3) { setTimeout(() => gameOver(true), 1600); }   // 異界ボス＝通关
   } else {
     Audio.sfx('chest');
-    // 分裂
-    if (e.def.behavior === 'split' && !e.isChild) {
-      for (let i = 0; i < 2; i++) {
-        _axis.crossVectors(e.dir, randDir()).normalize();
-        const cd = e.dir.clone().applyAxisAngle(_axis, 0.08).normalize();
-        const c = spawnEnemyDef('slime', cd, 0.5, 0.75); c.isChild = true;
-      }
-    }
   }
   updateHUD();
 }
@@ -1129,6 +1166,7 @@ const TREE_NODES = [
   { ic: '🌀', nm: '連撃', ds: '攻撃速度 +12%', max: 4, lv: 0, ap: () => { atkCdMul *= 0.88; } },
   { ic: '✨', nm: '術理', ds: 'スキルCD -15%', max: 4, lv: 0, ap: () => { skillCdMul *= 0.85; } },
   { ic: '💨', nm: '回避', ds: 'ダッシュCD -15%', max: 4, lv: 0, ap: () => { dashCdMul *= 0.85; } },
+  { ic: '💚', nm: '治癒術', ds: 'スキル2を回復に', max: 1, lv: 0, ap: () => { healUnlocked = true; skillSlot2 = 'heal'; } },
 ];
 const treeEl = document.getElementById('skilltree'), treeNodesEl = document.getElementById('treeNodes'), treeSPEl = document.getElementById('treeSP'), treeCloseEl = document.getElementById('treeClose');
 function openTree() { if (gameState !== 'field') return; gameState = 'skilltree'; resetTouch(); renderTree(); treeEl.style.display = 'flex'; }
@@ -1154,8 +1192,53 @@ function closeTree() { treeEl.style.display = 'none'; gameState = 'field'; }
 treeCloseEl.addEventListener('click', closeTree);
 treeCloseEl.addEventListener('touchstart', e => { e.preventDefault(); closeTree(); }, { passive: false });
 
+// ============================================================ 永久養成（メタ）
+const META_UPG = [
+  { k: 'atk', ic: '⚔️', nm: '初期攻撃', ds: '+3 / Lv', max: 6 },
+  { k: 'hp', ic: '❤️', nm: '初期HP', ds: '+20 / Lv', max: 6 },
+  { k: 'move', ic: '🏃', nm: '移動速度', ds: '+5% / Lv', max: 4 },
+  { k: 'bow', ic: '🏹', nm: '弓を解放', ds: '最初から弓', max: 1 },
+  { k: 'coin', ic: '💰', nm: '金運', ds: 'コイン +1 / Lv', max: 5 },
+  { k: 'revive', ic: '🪽', nm: '復活の翼', ds: '復活 +1回 / Lv', max: 3 },
+];
+let meta = { gems: 0, atk: 0, hp: 0, move: 0, bow: 0, coin: 0, revive: 0 };
+try { const s = JSON.parse(localStorage.getItem('hd2d_meta')); if (s) meta = Object.assign(meta, s); } catch (e) { }
+function saveMeta() { try { localStorage.setItem('hd2d_meta', JSON.stringify(meta)); } catch (e) { } }
+function metaCost(nd) { return (meta[nd.k] + 1) * 8; }
+let reviveTokens = 0, coinBonus = 0;
+function applyMeta() {
+  hero.maxHp = 100 + meta.hp * 20; hero.hp = hero.maxHp;
+  atkBonus = meta.atk * 3; moveMul = 1 + meta.move * 0.05;
+  bowUnlocked = meta.bow > 0; weapon = 'sword';
+  coinBonus = meta.coin; reviveTokens = meta.revive;
+}
+const metaEl = document.getElementById('metashop'), metaItemsEl = document.getElementById('metaItems'), metaGemsEl = document.getElementById('metaGems'), metaCloseEl = document.getElementById('metaClose');
+let metaReturn = 'title';
+function openMeta(from) { metaReturn = from || 'title'; gameState = 'meta'; resetTouch(); renderMeta(); metaEl.style.display = 'flex'; }
+function renderMeta() {
+  metaGemsEl.textContent = '💎 ' + meta.gems;
+  metaItemsEl.innerHTML = '';
+  META_UPG.forEach((nd, i) => {
+    const maxed = meta[nd.k] >= nd.max, cost = metaCost(nd), can = !maxed && meta.gems >= cost;
+    const c = document.createElement('div'); c.className = 'luCard' + (can ? '' : ' dis');
+    c.innerHTML = `<div class="ic">${nd.ic}</div><div class="nm">${nd.nm}</div><div class="ds">${nd.ds}</div><div class="pr">Lv ${meta[nd.k]}/${nd.max}${maxed ? '' : ' ・💎' + cost}</div>`;
+    c.addEventListener('click', () => buyMeta(i));
+    c.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); buyMeta(i); }, { passive: false });
+    metaItemsEl.appendChild(c);
+  });
+}
+function buyMeta(i) {
+  if (gameState !== 'meta') return;
+  const nd = META_UPG[i], cost = metaCost(nd);
+  if (meta[nd.k] >= nd.max || meta.gems < cost) { Audio.sfx('cancel'); return; }
+  meta.gems -= cost; meta[nd.k]++; saveMeta(); Audio.sfx('confirm'); renderMeta();
+}
+function closeMeta() { metaEl.style.display = 'none'; if (metaReturn === 'gameover') { gameState = 'gameover'; goEl.style.display = 'flex'; } else if (metaReturn === 'pause') { gameState = 'field'; } else { showTitle(); } }
+metaCloseEl.addEventListener('click', closeMeta);
+metaCloseEl.addEventListener('touchstart', e => { e.preventDefault(); closeMeta(); }, { passive: false });
+
 // ============================================================ ゲームオーバー / 結果 / 排行榜
-const goEl = document.getElementById('gameover'), goResEl = document.getElementById('goRes'), goBoardEl = document.getElementById('goBoard'), goTitleEl = document.getElementById('goTitle'), goRestartEl = document.getElementById('goRestart');
+const goEl = document.getElementById('gameover'), goResEl = document.getElementById('goRes'), goBoardEl = document.getElementById('goBoard'), goTitleEl = document.getElementById('goTitle'), goRestartEl = document.getElementById('goRestart'), goMetaEl = document.getElementById('goMeta'), goMetaBtn = document.getElementById('goMetaBtn'), goTitleBtn = document.getElementById('goTitleBtn');
 let board = [];
 try { const s = JSON.parse(localStorage.getItem('hd2d_board')); if (Array.isArray(s)) board = s; } catch (e) { }
 function pushBoard(sc, wv) {
@@ -1165,32 +1248,70 @@ function pushBoard(sc, wv) {
 }
 function gameOver(cleared) {
   saveBest(); pushBoard(score, wave);
+  const earned = Math.floor(coins * 0.5 + wave * 3 + (cleared ? 80 : 0));
+  meta.gems += earned; saveMeta();
   gameState = 'gameover'; resetTouch();
   goTitleEl.textContent = cleared ? '★ STAGE CLEAR ★' : 'GAME OVER';
   goTitleEl.style.color = cleared ? '#7ef0a0' : '#ff7e6a';
   goResEl.innerHTML = `星: ${THEMES[themeIndex].en}<br>WAVE ${wave} ・ Lv ${hero.level}<br>SCORE <b style="color:#ffd27a">${score}</b> ・ ◆${coins}`;
   goBoardEl.innerHTML = '— RANKING —<br>' + board.map((b, i) => `${i + 1}. <b>${b.s}</b> (W${b.w})`).join('<br>');
+  goMetaEl.innerHTML = `💎 +${earned} 獲得！（所持 ${meta.gems}）`;
   goEl.style.display = 'flex';
 }
-function restartRun() {
-  goEl.style.display = 'none';
-  // リセット
+function clearRun() {
   for (const e of enemies) scene.remove(e.model.root); enemies.length = 0; bossRef = null; bossbarEl.style.display = 'none';
   for (const p of pickups) scene.remove(p.obj); pickups.length = 0;
   for (const pr of projectiles) scene.remove(pr.mesh); projectiles.length = 0;
   for (const ar of arrows) scene.remove(ar.mesh); arrows.length = 0;
   for (const a of aoes) scene.remove(a.grp); aoes.length = 0;
-  hero.hp = 100; hero.maxHp = 100; hero.exp = 0; hero.level = 1;
-  atkBonus = 0; moveMul = 1; atkCdMul = 1; dashCdMul = 1; skillCdMul = 1; skillPoints = 0;
-  weapon = 'sword'; bowUnlocked = false; bowPower = 0; for (const nd of TREE_NODES) nd.lv = 0;
-  equippedGear = null; recomputeGear(); airSlam = false; dashAttack = false; gravMul = 1;
-  score = 0; coins = 0; planetMul = 1; themeIndex = 0; applyTheme(0);
-  pDir.set(0, 1, 0); jumpH = 0; jumpV = 0; grounded = true; invulnT = 1;
-  wave = 0; gameState = 'field'; startWave(1); updateHUD();
-  showArea('リスタート', 'RESTART');
 }
+function beginRun() {
+  goEl.style.display = 'none'; titleEl.style.display = 'none';
+  clearRun();
+  hero.exp = 0; hero.level = 1;
+  atkCdMul = 1; dashCdMul = 1; skillCdMul = 1; skillPoints = 0;
+  bowPower = 0; for (const nd of TREE_NODES) nd.lv = 0;
+  equippedGear = null; recomputeGear(); airSlam = false; dashAttack = false; gravMul = 1;
+  skillSlot2 = 'shock'; healUnlocked = false;
+  score = 0; coins = 0; planetMul = 1; themeIndex = 0; applyTheme(0);
+  applyMeta();                          // メタ強化を反映（HP/攻撃/移動/弓/復活/金運）
+  pDir.set(0, 1, 0); jumpH = 0; jumpV = 0; grounded = true; invulnT = 1.5;
+  wave = 0; gameState = 'field'; startWave(1); updateHUD();
+}
+function restartRun() { beginRun(); showArea('リスタート', 'RESTART'); }
+function startGame() { beginRun(); showArea('はじまり', THEMES[0].en); }
+function backToTitle() { goEl.style.display = 'none'; gameState = 'title'; clearRun(); resetTouch(); titleEl.style.display = 'flex'; }
 goRestartEl.addEventListener('click', restartRun);
 goRestartEl.addEventListener('touchstart', e => { e.preventDefault(); restartRun(); }, { passive: false });
+goMetaBtn.addEventListener('click', () => { goEl.style.display = 'none'; openMeta('gameover'); });
+goMetaBtn.addEventListener('touchstart', e => { e.preventDefault(); goEl.style.display = 'none'; openMeta('gameover'); }, { passive: false });
+goTitleBtn.addEventListener('click', backToTitle);
+goTitleBtn.addEventListener('touchstart', e => { e.preventDefault(); backToTitle(); }, { passive: false });
+
+// ============================================================ タイトル / ポーズ
+const titleEl = document.getElementById('title'), titleInfoEl = document.getElementById('titleInfo');
+const pauseEl = document.getElementById('pause');
+function showTitle() {
+  gameState = 'title'; titleEl.style.display = 'flex';
+  titleInfoEl.textContent = `自己ベスト: WAVE ${best.wave} / SCORE ${best.score}\n💎 ${meta.gems}`;
+}
+document.getElementById('tStart').addEventListener('click', () => { kickAudio(); startGame(); });
+document.getElementById('tStart').addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); startGame(); }, { passive: false });
+document.getElementById('tMeta').addEventListener('click', () => { titleEl.style.display = 'none'; openMeta('title'); });
+document.getElementById('tMeta').addEventListener('touchstart', e => { e.preventDefault(); titleEl.style.display = 'none'; openMeta('title'); }, { passive: false });
+document.getElementById('tHelp').addEventListener('click', () => { titleInfoEl.textContent = '移動WASD/スティック ・ 攻撃J/タップ ・ ジャンプSpace\nダッシュK ・ スキルL/U ・ 弓R ・ 技能T ・ 会話F\nワープゲートで次の星へ。死んでも💎は貯まる。'; });
+function togglePause() {
+  if (gameState === 'field') { gameState = 'paused'; resetTouch(); pauseEl.style.display = 'flex'; }
+  else if (gameState === 'paused') { gameState = 'field'; pauseEl.style.display = 'none'; }
+}
+document.getElementById('pauseResume').addEventListener('click', togglePause);
+document.getElementById('pauseResume').addEventListener('touchstart', e => { e.preventDefault(); togglePause(); }, { passive: false });
+document.getElementById('pauseMeta').addEventListener('click', () => { pauseEl.style.display = 'none'; gameState = 'paused'; openMeta('pause'); });
+document.getElementById('pauseTitle').addEventListener('click', () => { pauseEl.style.display = 'none'; clearRun(); showTitle(); });
+const volSlider = document.getElementById('volSlider');
+volSlider.value = (() => { try { return localStorage.getItem('hd2d_vol') || '1'; } catch (e) { return '1'; } })();
+Audio.setVolume(+volSlider.value);
+volSlider.addEventListener('input', e => { Audio.setVolume(+e.target.value); try { localStorage.setItem('hd2d_vol', e.target.value); } catch (er) { } });
 
 // ============================================================ ボスの範囲攻撃（地面の赤円→爆発）
 const aoes = [];
@@ -1214,7 +1335,7 @@ function aoeDamage(r, dmg, color = 0xfff2c0) {
   for (const e of enemies) {
     if (!e.alive) continue;
     if (pDir.dot(e.dir) < co) continue;
-    e.hp -= dmg; e.hitFlash = 0.18;
+    e.hp -= e.affix === 'tough' ? Math.round(dmg * 0.6) : dmg; e.hitFlash = 0.18;
     showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), dmg, 'crit');
     _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.1).normalize();
     if (e.hp <= 0) killEnemy(e);
@@ -1316,12 +1437,17 @@ addEventListener('keydown', e => {
   keys[k] = true;
   if (gameState === 'levelup') { if (k === '1' || k === '2' || k === '3') pickUpgrade(+k - 1); return; }
   if (gameState === 'shop') { if (k >= '1' && k <= '4') buyItem(+k - 1); else if (k === 'escape' || k === 'f' || k === 'enter') closeShop(); return; }
-  if (gameState === 'skilltree') { if (k >= '1' && k <= '7') buyNode(+k - 1); else if (k === 'escape' || k === 't' || k === 'f') closeTree(); return; }
+  if (gameState === 'skilltree') { if (k >= '1' && k <= '8') buyNode(+k - 1); else if (k === 'escape' || k === 't' || k === 'f') closeTree(); return; }
+  if (gameState === 'meta') { if (k === 'escape' || k === 'f') closeMeta(); return; }
   if (gameState === 'gameover') { if (k === 'enter' || k === ' ' || k === 'r') restartRun(); return; }
+  if (gameState === 'title') { if (k === 'enter' || k === ' ') startGame(); return; }
+  if (gameState === 'paused') { if (k === 'escape' || k === 'p' || k === 'enter') togglePause(); return; }
+  if (k === 'escape' || k === 'p') { togglePause(); return; }
   if (k === 'j') { doAttack(); }
   else if (k === ' ') { doJump(); e.preventDefault(); }
   else if (k === 'k') { doDash(); }
-  else if (k === 'l') { doSkill(); }
+  else if (k === 'l') { doSkill(1); }
+  else if (k === 'u') { doSkill(2); }
   else if (k === 'r') { switchWeapon(); }
   else if (k === 't') { openTree(); }
   else if (k === 'f' || k === 'enter') { interact(); e.preventDefault(); }
@@ -1334,14 +1460,17 @@ const btnA = document.getElementById('btnA');
 const btnJump = document.getElementById('btnJump');
 const btnDash = document.getElementById('btnDash');
 const btnSkill = document.getElementById('btnSkill');
+const btnSkill2 = document.getElementById('btnSkill2');
 const btnWep = document.getElementById('btnWep');
 const btnTree = document.getElementById('btnTree');
+const btnPause = document.getElementById('btnPause');
 function bindBtn(btn, fn) {
   btn.addEventListener('click', e => { e.preventDefault(); fn(); });
   btn.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); fn(); }, { passive: false });
 }
-bindBtn(btnA, actionA); bindBtn(btnJump, doJump); bindBtn(btnDash, doDash); bindBtn(btnSkill, doSkill);
+bindBtn(btnA, actionA); bindBtn(btnJump, doJump); bindBtn(btnDash, doDash);
 bindBtn(btnWep, switchWeapon); bindBtn(btnTree, openTree);
+bindBtn(btnSkill, () => doSkill(1)); bindBtn(btnSkill2, () => doSkill(2)); bindBtn(btnPause, togglePause);
 
 // デスクトップ: クリックで 会話送り or 攻撃
 addEventListener('pointerdown', e => {
@@ -1381,7 +1510,7 @@ function endJoy() {
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #btnWep, #btnTree, #levelup, #shop, #skilltree, #gameover')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #btnSkill2, #btnWep, #btnTree, #btnPause, #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #title')); }
 
 // タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
 function assignRoles() {
@@ -1404,6 +1533,7 @@ function assignRoles() {
 addEventListener('touchstart', e => {
   if (onUI(e.target)) return;                    // スライダー/メニュー等はそのまま操作
   if (gameState === 'dialogue') { e.preventDefault(); interact(); return; } // タップで送り
+  if (gameState !== 'field') { e.preventDefault(); return; }                  // メニュー中は移動・視点なし
   for (const t of e.changedTouches) touchMap.set(t.identifier, { x: t.clientX, y: t.clientY });
   assignRoles();
   e.preventDefault();
@@ -1620,8 +1750,10 @@ function combatUpdate(dt, t) {
       let dmg = 8 + hero.level * 2 + atkBonus + gearBonus.atk + Math.floor(Math.random() * 5);
       if (comboHeavy) dmg = Math.floor(dmg * 1.8);
       if (dashAttack) dmg = Math.floor(dmg * 1.4);
-      const crit = Math.random() < 0.2 + gearBonus.crit; const tot = crit ? dmg * 2 : dmg;
+      const crit = Math.random() < 0.2 + gearBonus.crit; let tot = crit ? dmg * 2 : dmg;
+      if (e.affix === 'tough') tot = Math.round(tot * 0.6);
       e.hp -= tot; e.hitFlash = 0.18;
+      if (comboHeavy) addStatus(e, 'freeze', 1.5);            // 3段で凍結
       if (gearBonus.lifesteal > 0) { hero.hp = Math.min(hero.maxHp, hero.hp + tot * gearBonus.lifesteal); }
       if (crit || comboHeavy) hitStop = Math.max(hitStop, 0.05); // 顿帧
       showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3.2 : 1.8), tot, crit ? 'crit' : '');
@@ -1634,26 +1766,30 @@ function combatUpdate(dt, t) {
   }
   // 敵の挙動
   for (const e of enemies) {
-    // 発光フラッシュ（ベース自発光＋白フラッシュ）
-    if (e.hitFlash > 0) { e.hitFlash -= dt; const f = Math.max(0, e.hitFlash / 0.18); for (const m of e.mats) m.emissive.copy(m.userData.be || COL_BLACK).addScalar(f * 0.9); }
+    if (e.hitFlash > 0) e.hitFlash -= dt;
+    // 発光: 被弾の白 > 状態異常の色 > ベース自発光
+    const f = Math.max(0, e.hitFlash / 0.18), tnt = e.alive ? statusTint(e) : null;
+    for (const m of e.mats) { if (f > 0) m.emissive.copy(m.userData.be || COL_BLACK).addScalar(f * 0.9); else if (tnt) m.emissive.set(tnt).multiplyScalar(0.55); else m.emissive.copy(m.userData.be || COL_BLACK); }
     if (!e.alive) {
-      if (e.dead > 0) { e.dead -= dt; e.model.root.scale.setScalar(Math.max(0.001, e.def.scale * e.dead * 2)); if (e.dead <= 0) e.model.root.visible = false; }
+      if (e.dead > 0) { e.dead -= dt; e.model.root.scale.setScalar(Math.max(0.001, (e.escale || e.def.scale) * e.dead * 2)); if (e.dead <= 0) e.model.root.visible = false; }
       continue;
     }
+    if (!tickStatus(e, dt)) continue;                        // DoTで死亡
     if (e.atkCD > 0) e.atkCD -= dt; if (e.chargeT > 0) e.chargeT -= dt; e.bobT += dt;
     const d = THREE.MathUtils.clamp(pDir.dot(e.dir), -1, 1);
     const angDist = Math.acos(d) * PLANET_R;
     const bh = e.def.behavior;
+    const frz = (e.freeze > 0 ? 0.4 : 1) * ((e.affix === 'enrage' && e.hp < e.maxHp * 0.4) ? 1.7 : 1); // 凍結減速 / 狂暴加速
     if (e.isBoss) { e.castCD = (e.castCD || 3) - dt; if (e.castCD <= 0 && angDist < 22) { e.castCD = 4.2; bossCast(e); } }
     if (angDist < e.def.aggro) {
       if (bh === 'caster') {                              // 詠唱: 距離を取りつつ弾を撃つ
         const want = e.def.atkRange * 0.55;
-        const move = (angDist < want ? -1 : 0.6) * e.def.speed * dt / PLANET_R; // 近いと後退
+        const move = (angDist < want ? -1 : 0.6) * e.def.speed * frz * dt / PLANET_R; // 近いと後退
         _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, move).normalize();
         if (e.atkCD <= 0) { e.atkCD = 2.0; spawnProjectile(e.dir.clone(), pDir.clone(), e.atk); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.4), 0xc78aff, 4); }
       } else if (angDist > e.def.atkRange) {              // 追尾（突進敵は接近時バースト）
         if (bh === 'charge' && e.atkCD <= 0 && angDist < e.def.aggro * 0.7) { e.chargeT = 0.5; e.atkCD = 2.4; }
-        const sp = e.def.speed * (e.chargeT > 0 ? 2.6 : 1);
+        const sp = e.def.speed * frz * (e.chargeT > 0 ? 2.6 : 1);
         _axis.crossVectors(e.dir, pDir).normalize();
         e.dir.applyAxisAngle(_axis, Math.min(sp * dt / PLANET_R, angDist / PLANET_R)).normalize();
       } else if (e.atkCD <= 0) {                          // 近接攻撃
@@ -1683,7 +1819,7 @@ function update(dt, t) {
   if (dashT > 0) dashT -= dt; if (dashCD > 0) dashCD -= dt;
   if (attackT > 0) attackT -= dt; if (attackCD > 0) attackCD -= dt;
   if (invulnT > 0) invulnT -= dt; if (hurtFlash > 0) hurtFlash -= dt;
-  if (skillT > 0) skillT -= dt; if (skillCD > 0) skillCD -= dt; if (shakeT > 0) shakeT -= dt;
+  if (skillT > 0) skillT -= dt; if (skillCD > 0) skillCD -= dt; if (skill2CD > 0) skill2CD -= dt; if (shakeT > 0) shakeT -= dt;
   if (comboTimer > 0) comboTimer -= dt; else comboHeavy = false;
   updateEffects(dt);
   hurtEl.style.opacity = Math.max(0, hurtFlash / 0.4 * 0.9);
@@ -1818,12 +1954,10 @@ function animate() {
   composer.render();
 }
 
-// 起動時にエリア名 + 自己ベスト
-setTimeout(() => showArea('まるい大地', best.wave > 1 ? 'BEST WAVE ' + best.wave : 'TINY PLANET'), 600);
-
-// 起動
-startWave(1);
+// 起動：タイトル画面から
+applyMeta();
 updateHUD();
+showTitle();
 applyTimeOfDay(timeOfDay);
 animate();
 const loading = document.getElementById('loading');

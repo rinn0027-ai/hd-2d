@@ -1,12 +1,16 @@
 // audio.js — Web Audioで全効果音/BGMを合成（音源ファイル不要）
 let ctx = null, master = null, bgmGain = null, sfxGain = null;
 let bgmTimer = null, step = 0, mood = 'day';
-let enabled = true;
+let enabled = true, vol = 1;
 
 export function audioReady() { return !!ctx; }
 export function setEnabled(v) {
   enabled = v;
-  if (master) master.gain.value = v ? 0.32 : 0.0;
+  if (master) master.gain.value = v ? 0.32 * vol : 0.0;
+}
+export function setVolume(v) {
+  vol = Math.max(0, Math.min(1, v));
+  if (master) master.gain.value = enabled ? 0.32 * vol : 0.0;
 }
 
 // 最初のユーザー操作で初期化/再開（自動再生制限対策）
@@ -15,7 +19,7 @@ export function ensureAudio() {
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
   ctx = new AC();
-  master = ctx.createGain(); master.gain.value = enabled ? 0.32 : 0; master.connect(ctx.destination);
+  master = ctx.createGain(); master.gain.value = enabled ? 0.32 * vol : 0; master.connect(ctx.destination);
   bgmGain = ctx.createGain(); bgmGain.gain.value = 0.55; bgmGain.connect(master);
   sfxGain = ctx.createGain(); sfxGain.gain.value = 0.9; sfxGain.connect(master);
   startBGM();
