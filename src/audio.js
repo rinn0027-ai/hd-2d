@@ -1,7 +1,7 @@
 // audio.js — Web Audioで全効果音/BGMを合成（音源ファイル不要）
 let ctx = null, master = null, bgmGain = null, sfxGain = null;
 let bgmTimer = null, step = 0, mood = 'day';
-let enabled = true, vol = 1;
+let enabled = true, vol = 1, bgmVol = 0.55, sfxVol = 0.9;
 
 export function audioReady() { return !!ctx; }
 export function setEnabled(v) {
@@ -12,6 +12,9 @@ export function setVolume(v) {
   vol = Math.max(0, Math.min(1, v));
   if (master) master.gain.value = enabled ? 0.32 * vol : 0.0;
 }
+export function setBgmVolume(v) { bgmVol = Math.max(0, Math.min(1, v)); if (bgmGain) bgmGain.gain.value = bgmVol; }
+export function setSfxVolume(v) { sfxVol = Math.max(0, Math.min(1, v)); if (sfxGain) sfxGain.gain.value = sfxVol; }
+export function getVolumes() { return { master: vol, bgm: bgmVol, sfx: sfxVol }; }
 
 // 最初のユーザー操作で初期化/再開（自動再生制限対策）
 export function ensureAudio() {
@@ -20,8 +23,8 @@ export function ensureAudio() {
   if (!AC) return;
   ctx = new AC();
   master = ctx.createGain(); master.gain.value = enabled ? 0.32 * vol : 0; master.connect(ctx.destination);
-  bgmGain = ctx.createGain(); bgmGain.gain.value = 0.55; bgmGain.connect(master);
-  sfxGain = ctx.createGain(); sfxGain.gain.value = 0.9; sfxGain.connect(master);
+  bgmGain = ctx.createGain(); bgmGain.gain.value = bgmVol; bgmGain.connect(master);
+  sfxGain = ctx.createGain(); sfxGain.gain.value = sfxVol; sfxGain.connect(master);
   startBGM();
 }
 

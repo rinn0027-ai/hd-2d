@@ -725,6 +725,7 @@ const bossbarEl = document.getElementById('bossbar'), bossHpEl = document.getEle
 // ヒット火花エフェクト（追加合成スプライトのプール）
 const fxList = [];
 function spawnImpact(pos, color = 0xfff2c0, n = 6) {
+  n = Math.max(1, Math.round(n * gfxParticle));
   for (let i = 0; i < n; i++) {
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
     sp.position.copy(pos);
@@ -1713,7 +1714,6 @@ document.getElementById('tStart').addEventListener('touchstart', e => { e.preven
   bind('tDaily', startDaily); bind('tCodex', openCodex); }
 document.getElementById('tMeta').addEventListener('click', () => { titleEl.style.display = 'none'; openMeta('title'); });
 document.getElementById('tMeta').addEventListener('touchstart', e => { e.preventDefault(); titleEl.style.display = 'none'; openMeta('title'); }, { passive: false });
-document.getElementById('tHelp').addEventListener('click', () => { titleInfoEl.textContent = '移動WASD/スティック ・ 攻撃J/タップ ・ ジャンプSpace\nダッシュK ・ スキルL/U ・ 弓R ・ 技能T ・ 会話F\nワープゲートで次の星へ。死んでも💎は貯まる。'; });
 function togglePause() {
   if (gameState === 'field') { gameState = 'paused'; resetTouch(); pauseEl.style.display = 'flex'; }
   else if (gameState === 'paused') { gameState = 'field'; pauseEl.style.display = 'none'; }
@@ -1722,10 +1722,7 @@ document.getElementById('pauseResume').addEventListener('click', togglePause);
 document.getElementById('pauseResume').addEventListener('touchstart', e => { e.preventDefault(); togglePause(); }, { passive: false });
 document.getElementById('pauseMeta').addEventListener('click', () => { pauseEl.style.display = 'none'; gameState = 'paused'; openMeta('pause'); });
 document.getElementById('pauseTitle').addEventListener('click', () => { pauseEl.style.display = 'none'; clearRun(); showTitle(); });
-const volSlider = document.getElementById('volSlider');
-volSlider.value = (() => { try { return localStorage.getItem('hd2d_vol') || '1'; } catch (e) { return '1'; } })();
-Audio.setVolume(+volSlider.value);
-volSlider.addEventListener('input', e => { Audio.setVolume(+e.target.value); try { localStorage.setItem('hd2d_vol', e.target.value); } catch (er) { } });
+// 音量・画質・言語・チュートリアルは「設定」パネルへ統合（下部の設定ブロックで初期化）
 
 // ============================================================ ボスの範囲攻撃（地面の赤円→爆発）
 const aoes = [];
@@ -1885,6 +1882,8 @@ addEventListener('keydown', e => {
   if (gameState === 'meta') { if (k === 'escape' || k === 'f') closeMeta(); return; }
   if (gameState === 'chooser') { if (k >= '1' && k <= '3') { const cs = chooserOptsEl.children; if (cs[+k - 1]) cs[+k - 1].click(); } return; }
   if (gameState === 'codex') { if (k === 'escape' || k === 'f') closeCodex(); return; }
+  if (gameState === 'settings') { if (k === 'escape') closeSettings(); return; }
+  if (gameState === 'tutorial') { if (k === 'escape' || k === 'enter' || k === ' ') closeTutorial(); return; }
   if (gameState === 'gameover') { if (k === 'enter' || k === ' ' || k === 'r') restartRun(); return; }
   if (gameState === 'title') { if (k === 'enter' || k === ' ') startGame(); return; }
   if (gameState === 'paused') { if (k === 'escape' || k === 'p' || k === 'enter') togglePause(); return; }
@@ -1958,7 +1957,7 @@ function endJoy() {
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #btnSkill2, #btnWep, #btnTree, #btnPause, #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #title, #chooser, #codex')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #btnSkill2, #btnWep, #btnTree, #btnPause, #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #title, #chooser, #codex, #settings, #tutorial')); }
 
 // タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
 function assignRoles() {
@@ -2020,6 +2019,7 @@ addEventListener('touchcancel', onTouchEnd);
 // ============================================================ UI
 const $ = id => document.getElementById(id);
 let bloomOn = true, dofOn = true, pixelOn = false, mistOn = true, aberrOn = true;
+let gfxParticle = 1;     // 画質プリセット用の粒子量係数（低画質で削減）
 const WEATHERS = ['none', 'petals', 'rain'];
 const WEATHER_LABEL = { none: 'OFF', petals: '花びら', rain: '雨' };
 function syncUI() {
@@ -2060,6 +2060,82 @@ const panelTitle = panelEl.querySelector('.title');
 if (isTouch) panelEl.classList.add('collapsed');
 panelTitle.addEventListener('click', () => panelEl.classList.toggle('collapsed'));
 syncUI();
+
+// ============================================================ 設定 / i18n / チュートリアル / PWA
+const APP_VERSION = 'v1.0';
+const I18N = {
+  ja: { settings: '⚙ 設定', lang: '言語', quality: '画質', qLow: '低', qMed: '中', qHigh: '高', master: '音量', bgm: 'BGM', sfx: '効果音', resetSave: 'セーブを初期化', back: 'もどる', howto: '？ あそびかた', gotit: 'はじめる', pause: 'PAUSE', resume: 'つづける', meta: '💎 永久強化', toTitle: 'タイトルへ', start: '▶ はじめる', daily: '📅 今日の挑戦', codex: '📖 図鑑・実績', help: '？ あそびかた', resetConfirm: 'セーブデータを初期化しますか？',
+    tutBody: '【移動】左スティック / WASD（強く倒すとダッシュ）\n【攻撃】右下ボタン / J　【ジャンプ】Space\n【回避】DASH / K　【スキル】旋斬・衝撃 / L・U\n【必殺】ゲージ満タンで発動 / Q\n【武器】弓に持ち替え / R　【視点】右ドラッグ\n\n小さな星をめぐり、ウェーブを生き延びよう。\nボス撃破で遺物を獲得、星図で道を選ぶ。\n死んでも💎は貯まり、永久強化に使える。' },
+  zh: { settings: '⚙ 设置', lang: '语言', quality: '画质', qLow: '低', qMed: '中', qHigh: '高', master: '总音量', bgm: '音乐', sfx: '音效', resetSave: '清除存档', back: '返回', howto: '？ 玩法说明', gotit: '开始', pause: '暂停', resume: '继续', meta: '💎 永久强化', toTitle: '回到标题', start: '▶ 开始游戏', daily: '📅 每日挑战', codex: '📖 图鉴・成就', help: '？ 玩法说明', resetConfirm: '确定要清除存档吗？',
+    tutBody: '【移动】左摇杆 / WASD（推到底冲刺）\n【攻击】右下按钮 / J　【跳跃】空格\n【闪避】DASH / K　【技能】旋斩・冲击波 / L・U\n【必杀】能量满时发动 / Q\n【武器】切换弓 / R　【视角】右侧拖动\n\n环游小行星，撑过一波波敌人。\n击败 Boss 获得遗物，在星图上选择路线。\n死亡也会积累💎，用于永久强化。' },
+  en: { settings: '⚙ Settings', lang: 'Language', quality: 'Quality', qLow: 'Low', qMed: 'Med', qHigh: 'High', master: 'Master', bgm: 'Music', sfx: 'SFX', resetSave: 'Reset Save', back: 'Back', howto: '? How to Play', gotit: 'Start', pause: 'PAUSE', resume: 'Resume', meta: '💎 Upgrades', toTitle: 'Title', start: '▶ Start', daily: '📅 Daily', codex: '📖 Codex', help: '? How to Play', resetConfirm: 'Reset all saved data?',
+    tutBody: 'Move: left stick / WASD (push hard to dash)\nAttack: bottom-right / J   Jump: Space\nDodge: DASH / K   Skills: Spin / Shock = L / U\nUltimate: when gauge is full / Q\nWeapon: swap bow / R   Camera: drag right side\n\nTravel tiny planets and survive the waves.\nBeat bosses for relics; choose your path on the star map.\nGems (💎) persist on death for permanent upgrades.' },
+};
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { } }
+let lang = lsGet('hd2d_lang', (navigator.language || 'ja').slice(0, 2));
+if (!I18N[lang]) lang = 'ja';
+function t(k) { return (I18N[lang] && I18N[lang][k]) || I18N.ja[k] || k; }
+const segLangEl = document.getElementById('segLang'), segQualEl = document.getElementById('segQual');
+function applyLang(l) {
+  lang = I18N[l] ? l : 'ja'; lsSet('hd2d_lang', lang); document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => { const k = el.getAttribute('data-i18n'); if (k !== 'tutBody') el.textContent = t(k); });
+  document.getElementById('tutBody').textContent = t('tutBody');
+  for (const b of segLangEl.children) b.classList.toggle('on', b.dataset.v === lang);
+  if (gameState === 'title') showTitle();
+}
+
+// ---- 画質プリセット ----
+let quality = lsGet('hd2d_qual', isTouch ? 'med' : 'high');
+const QUAL = {
+  low:  { pr: 1, sh: false, bloom: false, dof: false, mist: false, part: 0.4 },
+  med:  { pr: Math.min(devicePixelRatio, 1.5), sh: true, bloom: true, dof: false, mist: true, part: 0.7 },
+  high: { pr: Math.min(devicePixelRatio, 2), sh: true, bloom: true, dof: true, mist: true, part: 1 },
+};
+function applyQuality(q) {
+  if (!QUAL[q]) q = 'med'; quality = q; lsSet('hd2d_qual', q);
+  const c = QUAL[q];
+  renderer.setPixelRatio(c.pr);
+  if (renderer.shadowMap.enabled !== c.sh) { renderer.shadowMap.enabled = c.sh; scene.traverse(o => { if (o.material) { if (Array.isArray(o.material)) o.material.forEach(m => m.needsUpdate = true); else o.material.needsUpdate = true; } }); }
+  bloomOn = c.bloom; bloom.enabled = c.bloom;
+  dofOn = c.dof; bokeh.enabled = c.dof;
+  mistOn = c.mist; mist.visible = c.mist;
+  gfxParticle = c.part;
+  for (const b of segQualEl.children) b.classList.toggle('on', b.dataset.v === q);
+  onResize(); syncUI();
+}
+
+// ---- 音量 ----
+const masterSlider = document.getElementById('masterSlider'), bgmSlider = document.getElementById('bgmSlider'), sfxSlider = document.getElementById('sfxSlider');
+masterSlider.value = lsGet('hd2d_vol', '1'); Audio.setVolume(+masterSlider.value);
+bgmSlider.value = lsGet('hd2d_bgm', '0.55'); Audio.setBgmVolume(+bgmSlider.value);
+sfxSlider.value = lsGet('hd2d_sfx', '0.9'); Audio.setSfxVolume(+sfxSlider.value);
+masterSlider.addEventListener('input', e => { Audio.setVolume(+e.target.value); lsSet('hd2d_vol', e.target.value); });
+bgmSlider.addEventListener('input', e => { Audio.setBgmVolume(+e.target.value); lsSet('hd2d_bgm', e.target.value); });
+sfxSlider.addEventListener('input', e => { Audio.setSfxVolume(+e.target.value); lsSet('hd2d_sfx', e.target.value); });
+
+// ---- 設定パネル ----
+const settingsEl = document.getElementById('settings');
+let settingsReturn = 'title';
+function openSettings() { settingsReturn = gameState === 'paused' ? 'paused' : 'title'; gameState = 'settings'; resetTouch(); titleEl.style.display = 'none'; pauseEl.style.display = 'none'; settingsEl.style.display = 'flex'; }
+function closeSettings() { settingsEl.style.display = 'none'; if (settingsReturn === 'paused') { gameState = 'paused'; pauseEl.style.display = 'flex'; } else { showTitle(); } }
+for (const b of segLangEl.children) { const fn = () => applyLang(b.dataset.v); b.addEventListener('click', fn); b.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); fn(); }, { passive: false }); }
+for (const b of segQualEl.children) { const fn = () => applyQuality(b.dataset.v); b.addEventListener('click', fn); b.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); fn(); }, { passive: false }); }
+function bindTap(id, fn) { const el = document.getElementById(id); if (!el) return; el.addEventListener('click', fn); el.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); fn(); }, { passive: false }); }
+bindTap('setClose', closeSettings);
+bindTap('setReset', () => { if (confirm(t('resetConfirm'))) { try { localStorage.clear(); } catch (e) { } location.reload(); } });
+bindTap('tSettings', openSettings);
+bindTap('pauseSettings', openSettings);
+
+// ---- チュートリアル ----
+const tutorialEl = document.getElementById('tutorial');
+let tutReturn = 'title';
+function openTutorial() { tutReturn = gameState; gameState = 'tutorial'; resetTouch(); document.getElementById('tutBody').textContent = t('tutBody'); titleEl.style.display = 'none'; tutorialEl.style.display = 'flex'; }
+function closeTutorial() { tutorialEl.style.display = 'none'; lsSet('hd2d_seen', '1'); if (tutReturn === 'title' || tutReturn === 'tutorial') showTitle(); else { gameState = tutReturn; } }
+bindTap('tHelp', openTutorial);
+bindTap('tutClose', closeTutorial);
+document.getElementById('titleVer').textContent = APP_VERSION + ' ・ Three.js HD-2D';
+// ※ applyQuality/applyLang/SW登録/初回チュートリアルは、onResize初期化後にファイル末尾でまとめて実行
 
 // 時刻 → ライト/空のグラデーション
 const dayKeys = [
@@ -2431,6 +2507,10 @@ updateHUD();
 showTitle();
 applyTimeOfDay(timeOfDay);
 animate();
+// 設定の初期適用（onResize/aspectFit 確定後）
+applyQuality(quality); applyLang(lang);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+if (!lsGet('hd2d_seen', '')) setTimeout(() => { if (gameState === 'title') openTutorial(); }, 600);
 const loading = document.getElementById('loading');
 loading.style.opacity = '0';
 setTimeout(() => loading.remove(), 700);
