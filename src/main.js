@@ -654,6 +654,7 @@ function freeDir(awayFromPlayer = true) {
 const ELITE_AFFIX = ['tough', 'enrage', 'split'];
 function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1, isChild = false) {
   const def = ENEMY_DEF[key];
+  discover('enemy', key);
   const elite = !isChild && (forceElite > 0 || (wave >= 2 && Math.random() < 0.14));   // 精英怪（ノード強制含む）
   if (elite && forceElite > 0) forceElite--;
   const e = M.makeEnemy(def.model);
@@ -665,20 +666,21 @@ function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1, isChild = false) {
   for (const m of mats) { m.emissive.copy(m.color).multiplyScalar(elite ? 0.7 : 0.45); m.emissiveIntensity = elite ? 1.0 : 0.7; m.userData.be = m.emissive.clone(); }
   addOutline(e.root, 1.07);
   scene.add(e.root);
-  const hp = def.hp * hpScale * planetMul * (elite ? 2.6 : 1);
-  const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp, maxHp: hp, atk: def.atk * planetMul * (elite ? 1.5 : 1), alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats, childScale, escale, elite, affix: elite ? ELITE_AFFIX[Math.floor(Math.random() * ELITE_AFFIX.length)] : null, burn: 0, poison: 0, freeze: 0 };
+  const hp = def.hp * hpScale * planetMul * (elite ? 2.6 : 1) * mEnemyHp * ngMul;
+  const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp, maxHp: hp, atk: def.atk * planetMul * (elite ? 1.5 : 1) * mEnemyAtk * ngMul, alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats, childScale, escale, elite, affix: elite ? ELITE_AFFIX[Math.floor(Math.random() * ELITE_AFFIX.length)] : null, burn: 0, poison: 0, freeze: 0 };
   if (elite) { const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffd27a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 })); aura.scale.setScalar(3.2); aura.position.y = e.height ? e.height * 0.5 : 1; e.root.add(aura); }
   enemies.push(en); return en;
 }
 function spawnBoss(n) {
   const e = M.makeBoss(THEMES[themeIndex].bossKind);
-  const hp = (BOSS_DEF.hp + (n - 5) * 60) * planetMul;
+  discover('boss', themeIndex);
+  const hp = (BOSS_DEF.hp + (n - 5) * 60) * planetMul * mEnemyHp * ngMul;
   e.root.scale.setScalar(BOSS_DEF.scale * 0.9);
   const mats = collectMats(e.root);
   for (const m of mats) { m.userData.be = m.emissive.clone(); }
   addOutline(e.root, 1.05);
   scene.add(e.root);
-  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, theme: themeIndex, dir: freeDir().clone(), hp, maxHp: hp, atk: BOSS_DEF.atk * planetMul, alive: true, atkCD: 2, castCD: 3, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, escale: BOSS_DEF.scale * 0.9, burn: 0, poison: 0, freeze: 0, mats, phase: 1, enrageMul: 1, invT: 0, addCD: 7 };
+  bossRef = { model: e, kind: 'boss', def: BOSS_DEF, theme: themeIndex, dir: freeDir().clone(), hp, maxHp: hp, atk: BOSS_DEF.atk * planetMul * mEnemyAtk * ngMul, alive: true, atkCD: 2, castCD: 3, bobT: 0, hitFlash: 0, dead: 0, isBoss: true, slamT: 0, escale: BOSS_DEF.scale * 0.9, burn: 0, poison: 0, freeze: 0, mats, phase: 1, enrageMul: 1, invT: 0, addCD: 7 };
   enemies.push(bossRef);
   Audio.sfx('encounter');
   document.getElementById('bossName').textContent = '◆ ' + THEMES[themeIndex].bossName + ' ◆';
@@ -687,7 +689,8 @@ function spawnBoss(n) {
 }
 function startWave(n) {
   wave = n;
-  if (n % 5 === 0) { spawnBoss(n); updateHUD(); return; }
+  if (n > meta.stats.maxWave) { meta.stats.maxWave = n; checkAch(); }
+  if (n % 5 === 0) { pushNode('boss'); spawnBoss(n); updateHUD(); return; }
   const count = Math.min(11, 3 + Math.floor(n * 0.9));
   const hpScale = 1 + (n - 1) * 0.16;
   const pool = THEMES[themeIndex].pool.slice(0, n >= 3 ? undefined : 2);  // 序盤は前2種、進むと全種
@@ -754,7 +757,7 @@ function dropPickup(type, dir, data) {
   pickups.push({ obj, type, data, dir: dir.clone().normalize(), t: Math.random() * 9, life: type === 'gear' ? 26 : 16 });
 }
 function collectPickup(type, data) {
-  if (type === 'coin') { coins += 1 + coinBonus; score += 5; Audio.sfx('cursor'); }
+  if (type === 'coin') { coins += 1 + coinBonus; meta.stats.coinsAll += 1 + coinBonus; score += 5; Audio.sfx('cursor'); }
   else if (type === 'heart') { hero.hp = Math.min(hero.maxHp, hero.hp + 18); Audio.sfx('heal'); showDmg(player.position.clone().addScaledVector(_up, 2.6), 18, 'heal'); }
   else if (type === 'gear') { gotGear(data); }
   else { gainExp(6); score += 3; Audio.sfx('cursor'); }
@@ -853,6 +856,7 @@ function updateArrowsP(dt) {
         if (bossBarrier(e)) { hit = true; break; }
         const crit = Math.random() < critTotal(); let tot = crit ? p.dmg * 2 : p.dmg;
         if (e.affix === 'tough') tot = Math.round(tot * 0.6);
+        tot = Math.round(tot * mPlayerDmg);
         e.hp -= tot; e.hitFlash = 0.18; registerHit(); if (crit) critFlash();
         if (Math.random() < 0.4) addStatus(e, 'poison', 4);   // 弓で毒
         if (relicCount('fire')) addStatus(e, 'burn', 3);
@@ -861,7 +865,7 @@ function updateArrowsP(dt) {
         let ls = lifestealTotal(); if (crit && syn('crit', 'vamp')) ls *= 2;  // 処刑
         if (ls > 0) hero.hp = Math.min(hero.maxHp, hero.hp + tot * ls);
         showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), tot, crit ? 'crit' : '');
-        spawnImpact(p.mesh.position.clone(), 0xffe6a0, 5); Audio.sfx('hit');
+        spawnImpact(p.mesh.position.clone(), 0xffe6a0, 5); Audio.sfx(crit ? 'crit' : 'hit');
         if (e.hp <= 0) killEnemy(e);
         hit = true; break;
       }
@@ -970,7 +974,8 @@ const gearBonus = { atk: 0, crit: 0, move: 0, lifesteal: 0, skillCd: 1 };
 let pendingLevels = 0;
 const ATTACK_DUR = 0.32, ATTACK_RANGE = 3.6, JUMP_V = 7.5, GRAVITY = 20, DASH_T = 0.22, DASH_SPEED = 22, DASH_CD = 0.55;
 const SKILL_DUR = 0.5, SKILL_CD = 3.5, SKILL_RANGE = 6.0;
-const hurtEl = document.getElementById('hurt');
+const hurtEl = document.getElementById('hurt'), vignetteEl = document.getElementById('vignette');
+let vignetteT = 0;
 
 function doAttack() {
   if (gameState !== 'field' || attackCD > 0 || skillT > 0) return;
@@ -998,6 +1003,7 @@ function switchWeapon() {
   showArea(weapon === 'bow' ? '弓に持ち替えた' : '剣に持ち替えた', weapon.toUpperCase());
 }
 function ringDamage(r, dmg, color, knock, applyStatus) {
+  dmg = Math.round(dmg * mPlayerDmg);
   spawnShock(pDir.clone(), r, color);
   const co = Math.cos(r / PLANET_R);
   for (const e of enemies) {
@@ -1052,7 +1058,9 @@ function doDash() {
 }
 function hurtPlayer(dmg, fromDir) {
   if (invulnT > 0 || dashT > 0) return;
+  dmg = dmg * mDmgTaken;
   hero.hp -= dmg; invulnT = 0.7; hurtFlash = 0.4; shakeT = Math.max(shakeT, 0.25); Audio.sfx('hit');
+  vignetteT = 0.5;
   showDmg(player.position.clone().addScaledVector(pDir, 2.6), Math.round(dmg));
   hitCombo = 0; comboEl.style.opacity = '0'; addUlt(6);       // 被弾でコンボ途切れ／ゲージは溜まる
   if (relicCount('thorn')) {                                   // 茨の鎧: 周囲反撃
@@ -1076,6 +1084,9 @@ function killEnemy(e) {
   if (!e.alive) return;
   const em = e.elite ? 2.5 : 1;
   e.alive = false; e.dead = 0.5; gainExp(Math.round(e.def.exp * planetMul * em));
+  meta.stats.kills++; if (e.isBoss) meta.stats.bossKills++;
+  if (e.isBoss || e.elite) { Audio.sfx('kill'); if (e.elite && !e.isBoss) hitStop = Math.max(hitStop, 0.07); } // 撃殺ジュース
+  checkAch();
   if (relicCount('chain')) {                                   // 連鎖爆発（過負荷シナジーで強化）
     const over = syn('chain', 'amp'), rr = over ? 7 : 5, cd = Math.round((18 + hero.level * 2) * (over ? 1.8 : 1));
     spawnImpact(e.model.root.position.clone(), over ? 0xff6a3a : 0xffae3a, over ? 18 : 12); spawnShock(e.dir.clone(), rr, over ? 0xff6a3a : 0xffae3a);
@@ -1105,8 +1116,16 @@ function killEnemy(e) {
     for (let i = 0; i < 8; i++) dropPickup('coin', randDir().lerp(e.dir, 0.5).normalize());
     hero.hp = hero.maxHp; Audio.sfx('victory');
     showArea(THEMES[e.theme].bossName + ' 撃破！', 'BOSS DEFEATED');
-    if (e.theme === 3) { setTimeout(() => gameOver(true), 1600); }   // 異界ボス＝通关
-    else setTimeout(() => { if (gameState === 'field') offerRelics(); }, 1300); // ボス報酬: 遺物選択
+    if (e.theme === 3) {                                            // 異界ボス＝星系制覇 → 凱旋 or NG+
+      meta.stats.cleared = true; checkAch();
+      setTimeout(() => {
+        if (gameState !== 'field') return;
+        showChooser('★ 星系制覇 ★', [
+          { ic: '🏆', nm: '凱旋', ds: '記録して終了', pick: () => gameOver(true) },
+          { ic: '🔁', nm: 'NG+' + (ngLoop + 1), ds: '難度を上げて続行', pick: () => continueNG() },
+        ]);
+      }, 1400);
+    } else setTimeout(() => { if (gameState === 'field') offerRelics(); }, 1300); // ボス報酬: 遺物選択
   } else {
     Audio.sfx('chest');
   }
@@ -1224,6 +1243,8 @@ const META_UPG = [
 ];
 let meta = { gems: 0, atk: 0, hp: 0, move: 0, bow: 0, coin: 0, revive: 0 };
 try { const s = JSON.parse(localStorage.getItem('hd2d_meta')); if (s) meta = Object.assign(meta, s); } catch (e) { }
+meta.ach = meta.ach || {}; meta.codex = meta.codex || {}; meta.codex.enemy = meta.codex.enemy || {}; meta.codex.boss = meta.codex.boss || {}; meta.codex.relic = meta.codex.relic || {}; meta.codex.cls = meta.codex.cls || {};
+meta.stats = Object.assign({ kills: 0, bossKills: 0, runs: 0, ults: 0, maxCombo: 0, maxWave: 0, coinsAll: 0, maxNg: 0 }, meta.stats || {});
 function saveMeta() { try { localStorage.setItem('hd2d_meta', JSON.stringify(meta)); } catch (e) { } }
 function metaCost(nd) { return (meta[nd.k] + 1) * 8; }
 let reviveTokens = 0, coinBonus = 0;
@@ -1318,7 +1339,7 @@ function renderRelicBar() {
   for (const s of activeSyns()) { const el = document.createElement('span'); el.textContent = s.nm; el.title = s.ds; synBarEl.appendChild(el); }
 }
 function addRelic(k) {
-  const before = activeSyns(); relics.push(k); recomputeStats(); renderRelicBar();
+  const before = activeSyns(); relics.push(k); recomputeStats(); renderRelicBar(); discover('relic', k);
   Audio.sfx('chest'); showArea(RELIC_MAP[k].nm + ' を獲得', RELIC_MAP[k].ds);
   const fresh = activeSyns().filter(s => !before.includes(s));
   if (fresh.length) setTimeout(() => showArea('シナジー: ' + fresh[0].nm, fresh[0].ds), 1000);
@@ -1334,10 +1355,10 @@ function updateUltUI() {
 }
 function doUlt() {
   if (gameState !== 'field' || ult < 100) return;
-  ult = 0; updateUltUI();
+  ult = 0; updateUltUI(); meta.stats.ults++; checkAch();
   slowMo = Math.max(slowMo, 1.2); invulnT = Math.max(invulnT, 1.4); shakeT = Math.max(shakeT, 0.6); critFlash();
   Audio.sfx('victory'); spawnShock(pDir.clone(), 30, 0xffd23a);
-  const dmg = Math.round((60 + hero.level * 8 + atkBonus * 3) * (1 + Math.min(hitCombo, 50) * 0.02) * skillDmgMul());
+  const dmg = Math.round((60 + hero.level * 8 + atkBonus * 3) * (1 + Math.min(hitCombo, 50) * 0.02) * skillDmgMul() * mPlayerDmg);
   for (const e of enemies) {
     if (!e.alive) continue; if (e.isBoss && e.invT > 0) continue;
     e.hp -= dmg; e.hitFlash = 0.25; registerHit(); addStatus(e, 'burn', 4);
@@ -1356,7 +1377,8 @@ let hitCombo = 0, hitComboT = 0;
 function comboRank(n) { return n >= 50 ? '神業!!' : n >= 30 ? 'COOL!' : n >= 15 ? 'GREAT!' : n >= 6 ? 'GOOD!' : ''; }
 function registerHit() {
   hitCombo++; hitComboT = 2.2; addUlt(2);
-  if (hitCombo >= 6) { score += 1; }
+  if (hitCombo > meta.stats.maxCombo) { meta.stats.maxCombo = hitCombo; checkAch(); }
+  if (hitCombo >= 6) { score += 1; if (hitCombo % 10 === 0) Audio.sfx('milestone'); }
   comboNumEl.innerHTML = hitCombo + '<small> HIT</small>';
   comboRankEl.textContent = comboRank(hitCombo);
   comboEl.style.opacity = '1';
@@ -1421,15 +1443,120 @@ function openNodePick() {
   const extras = ['elite', 'rest', 'shop', 'treasure'];
   for (let i = extras.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [extras[i], extras[j]] = [extras[j], extras[i]]; }
   const NODES = {
-    battle:   { ic: '⚔️', nm: '通常戦', ds: '次のウェーブへ', pick: () => advanceWave() },
-    elite:    { ic: '👑', nm: '精英戦', ds: '強敵＋良報酬', pick: () => { forceElite = 2; advanceWave(); } },
-    rest:     { ic: '🏕️', nm: '休息地', ds: 'HP40%回復', pick: () => { hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.4); updateHUD(); advanceWave(); } },
-    shop:     { ic: '🛒', nm: '行商人', ds: '買い物して進む', pick: () => { pendingAfterShop = true; chooserEl.style.display = 'none'; openShop(); } },
-    treasure: { ic: '🎁', nm: '宝箱', ds: '遺物を獲得', pick: () => { offerRelics(() => advanceWave()); } },
+    battle:   { ic: '⚔️', nm: '通常戦', ds: '次のウェーブへ', pick: () => { pushNode('battle'); advanceWave(); } },
+    elite:    { ic: '👑', nm: '精英戦', ds: '強敵＋良報酬', pick: () => { pushNode('elite'); forceElite = 2; advanceWave(); } },
+    rest:     { ic: '🏕️', nm: '休息地', ds: 'HP40%回復', pick: () => { pushNode('rest'); hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.4); updateHUD(); advanceWave(); } },
+    shop:     { ic: '🛒', nm: '行商人', ds: '買い物して進む', pick: () => { pushNode('shop'); pendingAfterShop = true; chooserEl.style.display = 'none'; openShop(); } },
+    treasure: { ic: '🎁', nm: '宝箱', ds: '遺物を獲得', pick: () => { pushNode('treasure'); offerRelics(() => advanceWave()); } },
   };
-  const items = [NODES.battle, NODES[extras[0]], NODES[extras[1]]];
+  const pool = extras.filter(k => !(k === 'shop' && mNoShop));   // 貧窮: 商店ノード除外
+  const items = [NODES.battle, NODES[pool[0]], NODES[pool[1]]];
   showChooser('星図：次の地を選べ', items);
 }
+
+// ============================================================ 実績・図鑑・変異・NG+・星図
+const toastWrapEl = document.getElementById('toastWrap'), mutBarEl = document.getElementById('mutBar'), starmapEl = document.getElementById('starmap');
+function toast(title, sub) {
+  const el = document.createElement('div'); el.className = 'toast';
+  el.innerHTML = `<b>${title}</b><small>${sub}</small>`; toastWrapEl.appendChild(el);
+  setTimeout(() => el.remove(), 3400);
+}
+// ---- 実績 ----
+const ACHS = [
+  { k: 'first', nm: 'はじめの一撃', ds: '敵を初撃破', gem: 5, chk: s => s.kills >= 1 },
+  { k: 'boss1', nm: '星の覇者', ds: 'ボスを撃破', gem: 15, chk: s => s.bossKills >= 1 },
+  { k: 'k100', nm: '百人斬り', ds: '累計100体撃破', gem: 20, chk: s => s.kills >= 100 },
+  { k: 'k1000', nm: '千人斬り', ds: '累計1000体撃破', gem: 60, chk: s => s.kills >= 1000 },
+  { k: 'combo30', nm: '連撃師', ds: '30HIT連撃', gem: 15, chk: s => s.maxCombo >= 30 },
+  { k: 'combo50', nm: '達人', ds: '50HIT連撃', gem: 30, chk: s => s.maxCombo >= 50 },
+  { k: 'ult', nm: '必殺解放', ds: '必殺を発動', gem: 10, chk: s => s.ults >= 1 },
+  { k: 'wave10', nm: '歴戦', ds: 'WAVE10到達', gem: 15, chk: s => s.maxWave >= 10 },
+  { k: 'wave20', nm: '不屈', ds: 'WAVE20到達', gem: 30, chk: s => s.maxWave >= 20 },
+  { k: 'clear', nm: '星系制覇', ds: '異界ボス撃破', gem: 50, chk: s => s.cleared },
+  { k: 'ng', nm: '輪廻', ds: 'NG+到達', gem: 40, chk: s => s.maxNg >= 1 },
+  { k: 'rich', nm: '富豪', ds: '累計1000コイン', gem: 25, chk: s => s.coinsAll >= 1000 },
+  { k: 'classall', nm: '万能戦士', ds: '全職業を解放', gem: 30, chk: () => meta.cls.archer && meta.cls.mage },
+];
+function checkAch() {
+  let any = false;
+  for (const a of ACHS) if (!meta.ach[a.k] && a.chk(meta.stats)) { meta.ach[a.k] = Date.now(); meta.gems += a.gem; any = true; toast('🏆 実績解除', a.nm + ' ＋💎' + a.gem); Audio.sfx('achieve'); }
+  if (any) saveMeta();
+}
+function discover(cat, key) { if (!meta.codex[cat][key]) { meta.codex[cat][key] = 1; saveMeta(); } }
+
+// ---- 変異詞条 ----
+let mEnemyHp = 1, mEnemyAtk = 1, mEnemySpeed = 1, mPlayerDmg = 1, mPlayerHp = 1, mDmgTaken = 1, mGem = 1, mNoShop = false;
+let activeMuts = [], pendingMuts = null, pendingDaily = false, dailyMode = false, ngLoop = 0, ngMul = 1;
+const MUTATORS = [
+  { k: 'haste',   nm: '⚡倍速', ds: '敵速+50% / 💎+50%', ap() { mEnemySpeed *= 1.5; mGem *= 1.5; } },
+  { k: 'tank',    nm: '🛡硬化', ds: '敵HP+60% / 💎+40%', ap() { mEnemyHp *= 1.6; mGem *= 1.4; } },
+  { k: 'glass',   nm: '💀修羅', ds: '自HP半減 / 与ダメ+60%', ap() { mPlayerHp *= 0.5; mPlayerDmg *= 1.6; } },
+  { k: 'fragile', nm: '🩸痛打', ds: '被ダメ+50% / 💎+60%', ap() { mDmgTaken *= 1.5; mGem *= 1.6; } },
+  { k: 'poverty', nm: '🚫貧窮', ds: '商店なし / 💎+80%', ap() { mNoShop = true; mGem *= 1.8; } },
+  { k: 'savage',  nm: '😈猛攻', ds: '敵攻撃+50% / 与ダメ+30%', ap() { mEnemyAtk *= 1.5; mPlayerDmg *= 1.3; } },
+];
+function resetRunMods() { mEnemyHp = mEnemyAtk = mEnemySpeed = mPlayerDmg = mPlayerHp = mDmgTaken = mGem = 1; mNoShop = false; ngLoop = 0; ngMul = 1; dailyMode = false; activeMuts = []; renderMutBar(); }
+function applyMuts(keys) { for (const k of keys) { const m = MUTATORS.find(x => x.k === k); if (m) { m.ap(); activeMuts.push(m); } } renderMutBar(); }
+function renderMutBar() { mutBarEl.innerHTML = ''; for (const m of activeMuts) { const s = document.createElement('span'); s.textContent = m.nm; s.title = m.ds; mutBarEl.appendChild(s); } }
+// 日替わりシード
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function todayKey() { const d = new Date(); return '' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0'); }
+function dailySeed() { const k = todayKey(); let h = 0; for (let i = 0; i < k.length; i++) h = Math.imul(h, 31) + k.charCodeAt(i) | 0; return h >>> 0; }
+function dailyMutKeys() { const r = mulberry32(dailySeed()), pool = MUTATORS.map(m => m.k); for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; } return pool.slice(0, 2); }
+let dailyRec = {}; try { dailyRec = JSON.parse(localStorage.getItem('hd2d_daily')) || {}; } catch (e) { }
+function recordDaily(sc, wv) { const k = todayKey(); if (!dailyRec[k] || sc > dailyRec[k].s) { dailyRec[k] = { s: sc, w: wv }; try { localStorage.setItem('hd2d_daily', JSON.stringify(dailyRec)); } catch (e) { } } }
+
+// ---- NG+ ----
+function continueNG() {
+  ngLoop++; ngMul = 1 + 0.5 * ngLoop; meta.stats.maxNg = Math.max(meta.stats.maxNg, ngLoop); saveMeta(); checkAch();
+  chooserEl.style.display = 'none'; gameState = 'field'; waveBreak = 0;
+  themeIndex = 0; applyTheme(0); planetMul *= 1.15; clearRun();
+  hero.hp = hero.maxHp; pDir.set(0, 1, 0); jumpH = 0; jumpV = 0; grounded = true; invulnT = 1.5;
+  runNodes = ['start']; renderStarmap();
+  startWave(wave + 1); updateHUD(); showArea('NEW GAME+ ' + ngLoop, '難度上昇');
+}
+
+// ---- 星図ノード履歴 ----
+const NODE_IC = { start: '🚩', battle: '⚔️', elite: '👑', rest: '🏕️', shop: '🛒', treasure: '🎁', boss: '💀' };
+let runNodes = [];
+function pushNode(t) { runNodes.push(t); if (runNodes.length > 12) runNodes.shift(); renderStarmap(); }
+function renderStarmap() {
+  if (!runNodes.length) { starmapEl.style.display = 'none'; return; }
+  starmapEl.style.display = 'flex'; starmapEl.innerHTML = '';
+  runNodes.forEach((t, i) => {
+    if (i) { const l = document.createElement('div'); l.className = 'ln'; starmapEl.appendChild(l); }
+    const d = document.createElement('div'); d.className = 'nd' + (i === runNodes.length - 1 ? ' cur' : ''); d.textContent = NODE_IC[t] || '•'; starmapEl.appendChild(d);
+  });
+}
+
+// ---- 図鑑画面 ----
+const codexEl = document.getElementById('codex'), codexTabsEl = document.getElementById('codexTabs'), codexBodyEl = document.getElementById('codexBody'), codexCloseEl = document.getElementById('codexClose');
+let codexTab = 'ach';
+function openCodex() { gameState = 'codex'; codexEl.style.display = 'flex'; titleEl.style.display = 'none'; renderCodex(); }
+function closeCodex() { codexEl.style.display = 'none'; showTitle(); }
+function renderCodex() {
+  const tabs = [['ach', '🏆実績'], ['enemy', '👾敵'], ['boss', '💀ボス'], ['relic', '🔮遺物'], ['cls', '⚔職業']];
+  codexTabsEl.innerHTML = '';
+  for (const [k, nm] of tabs) { const el = document.createElement('div'); el.className = 'tab' + (codexTab === k ? ' on' : ''); el.textContent = nm; el.onclick = () => { codexTab = k; renderCodex(); }; codexTabsEl.appendChild(el); }
+  codexBodyEl.innerHTML = '';
+  const row = (ic, nm, ds, val, locked) => { const r = document.createElement('div'); r.className = 'row' + (locked ? ' locked' : ''); r.innerHTML = `<div class="ci">${locked ? '❔' : ic}</div><div class="ct"><div class="cn">${locked ? '？？？' : nm}</div><div class="cd">${locked ? '未発見' : ds}</div></div><div class="cv">${val || ''}</div>`; codexBodyEl.appendChild(r); };
+  if (codexTab === 'ach') {
+    const got = ACHS.filter(a => meta.ach[a.k]).length;
+    const h = document.createElement('div'); h.style.cssText = 'color:#aebbd6;font-size:12px;text-align:center'; h.textContent = `達成 ${got} / ${ACHS.length}　|　撃破 ${meta.stats.kills}・最高連撃 ${meta.stats.maxCombo}・最高WAVE ${meta.stats.maxWave}・周回 ${meta.stats.maxNg}`; codexBodyEl.appendChild(h);
+    for (const a of ACHS) row('🏆', a.nm, a.ds, meta.ach[a.k] ? '達成 💎' + a.gem : '💎' + a.gem, !meta.ach[a.k]);
+  } else if (codexTab === 'enemy') {
+    for (const k in ENEMY_DEF) row('👾', k, ENEMY_DEF[k].behavior || '敵', '', !meta.codex.enemy[k]);
+  } else if (codexTab === 'boss') {
+    THEMES.forEach((th, i) => row('💀', th.bossName, th.name, '', !meta.codex.boss[i]));
+  } else if (codexTab === 'relic') {
+    for (const d of RELIC_DEFS) row(d.ic, d.nm, d.ds, '', !meta.codex.relic[d.k]);
+    for (const s of SYNERGIES) row('✨', s.nm, s.ds, 'シナジー', false);
+  } else if (codexTab === 'cls') {
+    for (const k in CLASSES) row(CLASSES[k].ic, CLASSES[k].nm, CLASSES[k].ds, classUnlocked(k) ? '解放' : '💎' + CLASSES[k].cost, !meta.codex.cls[k] && !classUnlocked(k));
+  }
+}
+codexCloseEl.addEventListener('click', closeCodex);
+codexCloseEl.addEventListener('touchstart', e => { e.preventDefault(); closeCodex(); }, { passive: false });
 
 // ============================================================ ゲームオーバー / 結果 / 排行榜
 const goEl = document.getElementById('gameover'), goResEl = document.getElementById('goRes'), goBoardEl = document.getElementById('goBoard'), goTitleEl = document.getElementById('goTitle'), goRestartEl = document.getElementById('goRestart'), goMetaEl = document.getElementById('goMeta'), goMetaBtn = document.getElementById('goMetaBtn'), goTitleBtn = document.getElementById('goTitleBtn');
@@ -1442,7 +1569,9 @@ function pushBoard(sc, wv) {
 }
 function gameOver(cleared) {
   saveBest(); pushBoard(score, wave);
-  const earned = Math.floor(coins * 0.5 + wave * 3 + (cleared ? 80 : 0));
+  meta.stats.maxWave = Math.max(meta.stats.maxWave, wave); checkAch();
+  if (dailyMode) recordDaily(score, wave);
+  const earned = Math.floor((coins * 0.5 + wave * 3 + (cleared ? 80 : 0) + ngLoop * 40) * mGem);
   meta.gems += earned; saveMeta();
   gameState = 'gameover'; resetTouch();
   goTitleEl.textContent = cleared ? '★ STAGE CLEAR ★' : 'GAME OVER';
@@ -1470,15 +1599,19 @@ function beginRun() {
   score = 0; coins = 0; planetMul = 1; themeIndex = 0; applyTheme(0);
   relics = []; forceElite = 0; pendingAfterShop = false; hitCombo = 0; hitComboT = 0; comboEl.style.opacity = '0';
   ult = 0; updateUltUI();
+  resetRunMods(); if (pendingMuts) { applyMuts(pendingMuts); dailyMode = pendingDaily; } // 変異/日替わり
   applyMeta();                          // メタ強化を反映（HP/攻撃/移動/弓/復活/金運）
   applyClass();                         // 職業を反映（HP/攻撃/弓/暴撃/CD/スキル2）
+  hero.maxHp = Math.max(1, Math.round(hero.maxHp * mPlayerHp)); hero.hp = hero.maxHp; // 変異HP補正
   recomputeStats(); renderRelicBar();   // 遺物（最初は空）込みで再計算
+  runNodes = ['start']; renderStarmap(); discover('cls', currentClass); meta.stats.runs++;
   meta.lastClass = currentClass; saveMeta();
   pDir.set(0, 1, 0); jumpH = 0; jumpV = 0; grounded = true; invulnT = 1.5;
   wave = 0; gameState = 'field'; startWave(1); updateHUD();
 }
 function restartRun() { beginRun(); showArea('リスタート', 'RESTART'); }
-function startGame() { beginRun(); showArea('はじまり', THEMES[0].en); }
+function startGame() { pendingMuts = null; pendingDaily = false; beginRun(); showArea('はじまり', THEMES[0].en); }
+function startDaily() { pendingMuts = dailyMutKeys(); pendingDaily = true; beginRun(); showArea('今日の挑戦', activeMuts.map(m => m.nm).join(' ')); }
 function backToTitle() { goEl.style.display = 'none'; gameState = 'title'; clearRun(); resetTouch(); titleEl.style.display = 'flex'; }
 goRestartEl.addEventListener('click', restartRun);
 goRestartEl.addEventListener('touchstart', e => { e.preventDefault(); restartRun(); }, { passive: false });
@@ -1492,10 +1625,14 @@ const titleEl = document.getElementById('title'), titleInfoEl = document.getElem
 const pauseEl = document.getElementById('pause');
 function showTitle() {
   gameState = 'title'; titleEl.style.display = 'flex'; renderClassRow();
-  titleInfoEl.textContent = `職業: ${CLASSES[currentClass].nm}（カードで変更）\n自己ベスト WAVE ${best.wave} / SCORE ${best.score} ・ 💎 ${meta.gems}`;
+  starmapEl.style.display = 'none'; mutBarEl.innerHTML = '';
+  const dk = todayKey(), dr = dailyRec[dk];
+  titleInfoEl.textContent = `職業: ${CLASSES[currentClass].nm}（カードで変更）\n自己ベスト WAVE ${best.wave} / SCORE ${best.score} ・ 💎 ${meta.gems}` + (dr ? `\n今日の挑戦ベスト: SCORE ${dr.s} (W${dr.w})` : '');
 }
 document.getElementById('tStart').addEventListener('click', () => { kickAudio(); startGame(); });
 document.getElementById('tStart').addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); startGame(); }, { passive: false });
+{ const bind = (id, fn) => { const el = document.getElementById(id); el.addEventListener('click', () => { kickAudio(); fn(); }); el.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); fn(); }, { passive: false }); };
+  bind('tDaily', startDaily); bind('tCodex', openCodex); }
 document.getElementById('tMeta').addEventListener('click', () => { titleEl.style.display = 'none'; openMeta('title'); });
 document.getElementById('tMeta').addEventListener('touchstart', e => { e.preventDefault(); titleEl.style.display = 'none'; openMeta('title'); }, { passive: false });
 document.getElementById('tHelp').addEventListener('click', () => { titleInfoEl.textContent = '移動WASD/スティック ・ 攻撃J/タップ ・ ジャンプSpace\nダッシュK ・ スキルL/U ・ 弓R ・ 技能T ・ 会話F\nワープゲートで次の星へ。死んでも💎は貯まる。'; });
@@ -1669,6 +1806,7 @@ addEventListener('keydown', e => {
   if (gameState === 'skilltree') { if (k >= '1' && k <= '8') buyNode(+k - 1); else if (k === 'escape' || k === 't' || k === 'f') closeTree(); return; }
   if (gameState === 'meta') { if (k === 'escape' || k === 'f') closeMeta(); return; }
   if (gameState === 'chooser') { if (k >= '1' && k <= '3') { const cs = chooserOptsEl.children; if (cs[+k - 1]) cs[+k - 1].click(); } return; }
+  if (gameState === 'codex') { if (k === 'escape' || k === 'f') closeCodex(); return; }
   if (gameState === 'gameover') { if (k === 'enter' || k === ' ' || k === 'r') restartRun(); return; }
   if (gameState === 'title') { if (k === 'enter' || k === ' ') startGame(); return; }
   if (gameState === 'paused') { if (k === 'escape' || k === 'p' || k === 'enter') togglePause(); return; }
@@ -1742,7 +1880,7 @@ function endJoy() {
   joyKnob.style.transform = 'translate(-50%, -50%)';
   joyVec.x = joyVec.y = joyVec.mag = 0;
 }
-function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #btnSkill2, #btnWep, #btnTree, #btnPause, #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #title, #chooser')); }
+function onUI(target) { return !!(target && target.closest && target.closest('#panel, #ui, #hud, #btnA, #btnJump, #btnDash, #btnSkill, #btnSkill2, #btnWep, #btnTree, #btnPause, #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #title, #chooser, #codex')); }
 
 // タッチ数に応じて役割を割り当てる（2本以上=ピンチ優先）
 function assignRoles() {
@@ -1985,6 +2123,7 @@ function combatUpdate(dt, t) {
       if (dashAttack) dmg = Math.floor(dmg * 1.4);
       const crit = Math.random() < critTotal(); let tot = crit ? dmg * 2 : dmg;
       if (e.affix === 'tough') tot = Math.round(tot * 0.6);
+      tot = Math.round(tot * mPlayerDmg);
       e.hp -= tot; e.hitFlash = 0.18; registerHit();
       if (comboHeavy) addStatus(e, 'freeze', 1.5);            // 3段で凍結
       if (relicCount('fire')) addStatus(e, 'burn', 3);
@@ -1996,7 +2135,7 @@ function combatUpdate(dt, t) {
       if (crit || comboHeavy) { hitStop = Math.max(hitStop, crit ? 0.07 : 0.05); critFlash(); } // 顿帧+闪光
       showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3.2 : 1.8), tot, crit ? 'crit' : '');
       spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 2.2 : 1.2), 0xfff2c0, crit ? 8 : 5);
-      Audio.sfx('hit');
+      Audio.sfx(crit ? 'crit' : 'hit');
       if (!e.isBoss) { _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.07).normalize(); }
       if (e.hp <= 0) killEnemy(e);
     }
@@ -2017,7 +2156,7 @@ function combatUpdate(dt, t) {
     const d = THREE.MathUtils.clamp(pDir.dot(e.dir), -1, 1);
     const angDist = Math.acos(d) * PLANET_R;
     const bh = e.def.behavior;
-    const frz = (e.freeze > 0 ? 0.4 : 1) * ((e.affix === 'enrage' && e.hp < e.maxHp * 0.4) ? 1.7 : 1) * (e.enrageMul || 1); // 凍結減速 / 狂暴・怒り加速
+    const frz = (e.freeze > 0 ? 0.4 : 1) * ((e.affix === 'enrage' && e.hp < e.maxHp * 0.4) ? 1.7 : 1) * (e.enrageMul || 1) * mEnemySpeed; // 凍結減速 / 狂暴・怒り加速 / 変異速度
     if (e.isBoss) {
       if (e.invT > 0) e.invT -= dt;
       if (e.phase < 2 && e.hp <= e.maxHp * 0.66) enterBossPhase(e, 2);        // フェーズ移行
@@ -2068,6 +2207,7 @@ function update(dt, t) {
   comboTick(dt);
   updateEffects(dt);
   hurtEl.style.opacity = Math.max(0, hurtFlash / 0.4 * 0.9);
+  if (vignetteT > 0) vignetteT -= real; vignetteEl.style.opacity = Math.max(0, vignetteT / 0.5 * 0.85);
 
   let ix = 0, iy = 0, dash = false, playerMoving = false;
   if (gameState === 'field') {

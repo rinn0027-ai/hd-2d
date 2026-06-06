@@ -154,10 +154,10 @@
     #warpArrow { color: #7fe0ff; } #bossArrow { color: #ff6a6a; }
 
     /* レベルアップ / 商店 / スキルツリー / 結果（縦に長くてもスクロールで全部届く） */
-    #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #chooser { position: fixed; inset: 0; z-index: 16; display: none; flex-direction: column; align-items: center; justify-content: flex-start; gap: 14px;
+    #levelup, #shop, #skilltree, #gameover, #metashop, #pause, #chooser, #codex { position: fixed; inset: 0; z-index: 16; display: none; flex-direction: column; align-items: center; justify-content: flex-start; gap: 14px;
       padding: 5vh 10px calc(5vh + 80px); overflow-y: auto; -webkit-overflow-scrolling: touch;
       background: rgba(6,8,16,.72); backdrop-filter: blur(4px); font-family: ui-monospace, monospace; }
-    #levelup h2, #shop h2, #skilltree h2, #gameover h2, #metashop h2, #pause h2, #chooser h2 { color: #ffd27a; letter-spacing: .2em; font-size: 19px; text-shadow: 0 2px 10px #000; }
+    #levelup h2, #shop h2, #skilltree h2, #gameover h2, #metashop h2, #pause h2, #chooser h2, #codex h2 { color: #ffd27a; letter-spacing: .2em; font-size: 19px; text-shadow: 0 2px 10px #000; }
     #luOpts, #shopItems, #treeNodes, #metaItems, #chooserOpts { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 94vw; }
     #gameover .res { color: #eaf2ff; font-size: 14px; line-height: 1.9; text-align: center; }
     #gameover .lb { color: #cdd6e8; font-size: 12px; line-height: 1.7; text-align: center; min-width: 200px; }
@@ -208,6 +208,41 @@
     #relicBar span { font-size: 17px; filter: drop-shadow(0 1px 2px #000); }
     #synBar { position: fixed; left: 12px; top: 124px; z-index: 7; display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
     #synBar span { font: 700 10px ui-monospace, monospace; color: #ffe6a8; background: rgba(40,30,10,.55); border: 1px solid rgba(255,210,110,.4); border-radius: 6px; padding: 1px 6px; text-shadow: 0 1px 2px #000; }
+
+    /* 受撃ビネット（暗角） */
+    #vignette { position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: 0;
+      box-shadow: inset 0 0 120px 40px rgba(220,30,30,.85), inset 0 0 40px 10px rgba(255,80,60,.6); transition: opacity .08s; }
+
+    /* 実績トースト */
+    #toastWrap { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+    .toast { background: linear-gradient(180deg, rgba(40,32,12,.96), rgba(24,18,8,.96)); border: 1px solid #ffce6e; border-radius: 10px; padding: 8px 16px;
+      font-family: ui-monospace, monospace; color: #ffe6a8; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.5); animation: toastIn .4s ease, toastOut .4s ease 2.6s forwards; }
+    .toast b { color: #fff; font-size: 14px; } .toast small { display: block; color: #cdd6e8; font-size: 11px; margin-top: 2px; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+    @keyframes toastOut { to { opacity: 0; transform: translateY(-8px); } }
+
+    /* 変異詞条バー */
+    #mutBar { position: fixed; right: 10px; top: 92px; z-index: 7; display: flex; flex-direction: column; gap: 3px; align-items: flex-end; pointer-events: none; }
+    #mutBar span { font: 700 10px ui-monospace, monospace; color: #ff9ec2; background: rgba(40,12,26,.6); border: 1px solid rgba(255,140,190,.5); border-radius: 6px; padding: 1px 6px; text-shadow: 0 1px 2px #000; }
+
+    /* 星図ノード履歴 */
+    #starmap { position: fixed; top: 6px; left: 50%; transform: translateX(-50%); z-index: 7; display: none; align-items: center; gap: 1px; pointer-events: none;
+      background: rgba(8,12,24,.5); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 3px 8px; max-width: 92vw; overflow: hidden; }
+    #starmap .nd { font-size: 14px; opacity: .55; filter: grayscale(.3); }
+    #starmap .nd.cur { opacity: 1; filter: none; transform: scale(1.25); }
+    #starmap .ln { width: 6px; height: 2px; background: rgba(255,255,255,.25); border-radius: 2px; }
+
+    /* 図鑑 */
+    #codexTabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+    #codexTabs .tab { padding: 5px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: rgba(20,26,44,.7); color: #cdd6e8; font: 12px ui-monospace, monospace; cursor: pointer; }
+    #codexTabs .tab.on { border-color: #ffce6e; color: #ffe6a8; background: rgba(60,50,28,.8); }
+    #codexBody { display: flex; flex-direction: column; gap: 6px; max-width: 560px; width: 94vw; }
+    #codexBody .row { display: flex; align-items: center; gap: 10px; padding: 7px 11px; border-radius: 9px; background: rgba(18,24,40,.72); border: 1px solid rgba(255,255,255,.1); }
+    #codexBody .row.locked { opacity: .4; }
+    #codexBody .row .ci { font-size: 22px; width: 30px; text-align: center; }
+    #codexBody .row .ct { flex: 1; } #codexBody .row .ct .cn { color: #ffe6a8; font-size: 13px; font-weight: 700; }
+    #codexBody .row .ct .cd { color: #aebbd6; font-size: 11px; }
+    #codexBody .row .cv { color: #7fe0ff; font-size: 12px; font-weight: 700; }
     .luCard { width: 168px; padding: 16px 14px; border-radius: 12px; cursor: pointer; pointer-events: auto;
       background: linear-gradient(180deg, rgba(30,36,58,.96), rgba(16,20,34,.97)); border: 2px solid rgba(255,210,130,.5); color: #eaf2ff; text-align: center; }
     .luCard:hover, .luCard.sel { border-color: #ffd27a; background: rgba(255,210,130,.18); transform: translateY(-2px); }
@@ -409,6 +444,11 @@
   <div id="gameover"><h2 id="goTitle">GAME OVER</h2><div class="res" id="goRes"></div><div class="lb" id="goBoard"></div><div class="res" id="goMeta" style="color:#7fe0ff"></div><div id="goMetaBtn" class="luCard">💎 永久強化</div><div id="goRestart" class="luCard">もう一度</div><div id="goTitleBtn" class="luCard">タイトルへ</div></div>
   <div id="metashop"><h2>💎 永久強化 <span id="metaGems"></span></h2><div id="metaItems"></div><div id="metaClose" class="luCard">もどる</div></div>
   <div id="chooser"><h2 id="chooserTitle">選べ</h2><div id="chooserOpts"></div></div>
+  <div id="codex"><h2>📖 図鑑・実績</h2><div id="codexTabs"></div><div id="codexBody"></div><div id="codexClose" class="luCard">もどる</div></div>
+  <div id="vignette"></div>
+  <div id="toastWrap"></div>
+  <div id="mutBar"></div>
+  <div id="starmap"></div>
   <div id="pause"><h2>PAUSE</h2><div class="res">BGM音量 <input id="volSlider" type="range" min="0" max="1" step="0.05" value="1"></div><div id="pauseResume" class="luCard">つづける</div><div id="pauseMeta" class="luCard">💎 永久強化</div><div id="pauseTitle" class="luCard">タイトルへ</div></div>
 
   <div id="title">
@@ -417,6 +457,8 @@
     <div id="classRow"></div>
     <div id="titleBtns">
       <div id="tStart" class="luCard">▶ はじめる</div>
+      <div id="tDaily" class="luCard">📅 今日の挑戦</div>
+      <div id="tCodex" class="luCard">📖 図鑑・実績</div>
       <div id="tMeta" class="luCard">💎 永久強化</div>
       <div id="tHelp" class="luCard">？ あそびかた</div>
     </div>

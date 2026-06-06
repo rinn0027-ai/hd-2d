@@ -66,6 +66,10 @@ export function sfx(name) {
     case 'victory': [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => blip(f, 0.18, 'square', 0.25), i * 110)); break;
     case 'defeat':  [392, 330, 262, 196].forEach((f, i) => setTimeout(() => blip(f, 0.3, 'sawtooth', 0.22), i * 180)); break;
     case 'chest':   [659, 880, 1175].forEach((f, i) => setTimeout(() => blip(f, 0.14, 'square', 0.22), i * 90)); break;
+    case 'crit':    noiseHit(0.1, 0.4); blip(1100, 0.09, 'square', 0.32, 320); blip(660, 0.12, 'square', 0.2, 120); break;
+    case 'kill':    noiseHit(0.22, 0.5); blip(150, 0.18, 'square', 0.28, 55); break;
+    case 'milestone': blip(880, 0.06, 'square', 0.22); blip(1320, 0.1, 'square', 0.18); break;
+    case 'achieve': [784, 988, 1318, 1568].forEach((f, i) => setTimeout(() => blip(f, 0.16, 'square', 0.24), i * 90)); break;
   }
 }
 
