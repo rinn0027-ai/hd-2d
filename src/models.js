@@ -47,6 +47,59 @@ export function makeHumanoid(opts = {}) {
   const cap = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.34, 12), mHat);
   cap.position.y = 2.2; root.add(cap);
 
+  // ---- 右手の武器（剣 / 杖 / 弓を仕込み、職業で出し分け）----
+  const hand = new THREE.Group(); hand.position.set(0, -0.62, 0); armR.add(hand);
+  const steelMat = new THREE.MeshStandardMaterial({ color: 0xcdd3dc, roughness: 0.35, metalness: 0.6, emissive: 0x6a7480, emissiveIntensity: 0.3 });
+  const woodMat = mat(0x6b4a2a, 0.8);
+  const sword = new THREE.Group();
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, 0.04), steelMat); blade.position.y = 0.62;
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.09, 0.1), mat(0xb38b3a)); guard.position.y = 0.1;
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.26, 0.08), mat(0x3a2a18)); grip.position.y = -0.05;
+  sword.add(blade, guard, grip);
+  const staff = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 1.3, 8), woodMat); shaft.position.y = 0.5; staff.add(shaft);
+  const orbMat = new THREE.MeshStandardMaterial({ color: 0x9fe0ff, emissive: 0x2a7aff, emissiveIntensity: 1.5, roughness: 0.25 });
+  const orb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), orbMat); orb.position.y = 1.18; staff.add(orb);
+  const bow = new THREE.Group();
+  const bowArc = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.05, 8, 14, Math.PI * 1.25), woodMat);
+  bowArc.rotation.z = Math.PI / 2; bow.add(bowArc);
+  bow.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.56, 0), new THREE.Vector3(0, -0.56, 0)]), new THREE.LineBasicMaterial({ color: 0xeeeeee })));
+  bow.position.y = 0.2; bow.rotation.x = 0.1;
+  hand.add(sword, staff, bow);
+  const tip = new THREE.Object3D(); tip.position.set(0, 1.05, 0); hand.add(tip);  // トレイル用の刃先
+
+  // ---- 職業アクセサリ ----
+  const shoulderL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.17, 0.5), mat(0x80828c)); shoulderL.position.set(-0.45, 1.64, 0); root.add(shoulderL);
+  const shoulderR = shoulderL.clone(); shoulderR.position.x = 0.45; root.add(shoulderR);
+  const quiver = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.62, 8), mat(0x5a3a22)); quiver.position.set(-0.18, 1.3, -0.3); quiver.rotation.x = 0.35; root.add(quiver);
+  const capeRoot = new THREE.Group(); capeRoot.position.set(0, 1.5, -0.22); root.add(capeRoot);
+  const capeMat = mat(0x6a2020);
+  const cape = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.9, 0.05), capeMat); cape.position.y = -0.45; capeRoot.add(cape);
+
+  const CLASS_PAL = {
+    warrior: { cloth: 0x8a2f2f, pants: 0x3a2a18, hat: 0x70727b, cape: 0x5a1f1f },
+    archer:  { cloth: 0x2f6a3b, pants: 0x274a30, hat: 0x356a3b, cape: null },
+    mage:    { cloth: 0x432f7a, pants: 0x2a2050, hat: 0x5a3aa0, cape: 0x2a2060 },
+  };
+  let meleeKind = 'sword', curWeapon = 'sword';
+  function setWeapon(type) {
+    curWeapon = type; const bowOn = type === 'bow';
+    bow.visible = bowOn; sword.visible = !bowOn && meleeKind === 'sword'; staff.visible = !bowOn && meleeKind === 'staff';
+  }
+  function setClass(cls) {
+    const P = CLASS_PAL[cls] || CLASS_PAL.warrior;
+    mCloth.color.set(P.cloth); mPants.color.set(P.pants); mHat.color.set(P.hat);
+    meleeKind = cls === 'mage' ? 'staff' : 'sword';
+    shoulderL.visible = shoulderR.visible = cls === 'warrior';
+    quiver.visible = cls === 'archer';
+    capeRoot.visible = P.cape !== null; if (P.cape !== null) capeMat.color.set(P.cape);
+    brim.visible = cls !== 'warrior';
+    cap.scale.set(cls === 'mage' ? 0.8 : 1, cls === 'mage' ? 2.0 : 1, cls === 'mage' ? 0.8 : 1);
+    cap.position.y = cls === 'mage' ? 2.42 : 2.2;
+    setWeapon(curWeapon);
+  }
+  setClass('warrior');
+
   shadowAll(root);
   let phase = 0;
   function update(dt, moving, speed = 1, attackP = 0) {
@@ -56,11 +109,14 @@ export function makeHumanoid(opts = {}) {
       legL.rotation.x = s; legR.rotation.x = -s;
       if (attackP <= 0) { armL.rotation.x = -s; armR.rotation.x = s; }
       body.position.y = 1.12 + Math.abs(Math.sin(phase)) * 0.03;
+      capeRoot.rotation.x = 0.28 + Math.sin(phase) * 0.1;
     } else {
       legL.rotation.x = legR.rotation.x = 0;
       body.position.y = 1.12;
       if (attackP <= 0) { armL.rotation.x = armR.rotation.x = 0; }
+      capeRoot.rotation.x = 0.12;
     }
+    orb.material.emissiveIntensity = 1.2 + Math.sin(phase * 0.6 + dt) * 0.3 + Math.abs(Math.sin(phase)) * 0.4;
     if (attackP > 0) {                       // 攻撃の振り
       const sw = Math.sin(Math.min(1, attackP) * Math.PI);
       armR.rotation.x = -2.4 * sw;
@@ -70,7 +126,7 @@ export function makeHumanoid(opts = {}) {
       armR.rotation.z = 0;
     }
   }
-  return { root, update, height: 2.4 };
+  return { root, update, setClass, setWeapon, tip, height: 2.4 };
 }
 
 // ============================================================ 木

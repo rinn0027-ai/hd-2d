@@ -379,6 +379,7 @@ player.traverse(o => { if (o.isMesh && o.material && o.material.emissive) { o.ma
 addOutline(player, 1.1);                  // 黒い輪郭線
 scene.add(player);
 // 足元の光リング（位置をいつも把握できる目印）
+const _tipW = new THREE.Vector3();        // 武器の刃先ワールド座標（トレイル用）
 const markerMat = new THREE.MeshBasicMaterial({ color: 0x7fe0ff, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false });
 const marker = new THREE.Mesh(new THREE.RingGeometry(1.0, 1.32, 28), markerMat);
 marker.renderOrder = 3;
@@ -723,6 +724,14 @@ function updateEffects(dt) {
     if (s.t <= 0) { scene.remove(s.grp); s.grp.children[0].material.dispose(); shocks.splice(i, 1); continue; }
     s.grp.scale.setScalar(0.4 + s.r * k); s.grp.children[0].material.opacity = (1 - k) * 0.8;
   }
+  for (let i = meshFx.length - 1; i >= 0; i--) {
+    const f = meshFx[i]; f.t -= dt;
+    if (f.t <= 0) { scene.remove(f.mesh); if (f.mesh.material) f.mesh.material.dispose(); if (f.mesh.geometry) f.mesh.geometry.dispose(); meshFx.splice(i, 1); continue; }
+    const k = f.t / f.max;
+    if (f.grow) f.mesh.scale.x = f.mesh.scale.z = 1 + (1 - k) * f.grow;
+    if (f.spin) f.mesh.rotateOnAxis(_up, f.spin * dt);
+    f.mesh.material.opacity = k * f.op0;
+  }
 }
 // スキル等の攻撃範囲を示す拡散リング
 const shocks = [];
@@ -734,6 +743,51 @@ function spawnShock(dir, r, color = 0xbf8aff) {
   grp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
   scene.add(grp);
   shocks.push({ grp, r, t: 0.4, max: 0.4 });
+}
+
+// ============================================================ 元素スキル演出
+const meshFx = [];                         // 任意メッシュのフェード（光柱・斬光など）
+function pushMeshFx(mesh, life, opts = {}) { scene.add(mesh); meshFx.push({ mesh, t: life, max: life, op0: opts.op0 ?? 1, grow: opts.grow || 0, rise: opts.rise || 0, spin: opts.spin || 0, up: opts.up || null }); }
+function emberSprite(color) { return new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); }
+function tangentDir(a) { return _fwd.clone().multiplyScalar(Math.cos(a)).addScaledVector(_right, Math.sin(a)).normalize(); } // 接平面上の方位
+// 旋斬：炎の旋風
+function spawnFireWhirl() {
+  spawnShock(pDir.clone(), SKILL_RANGE, 0xff7a2a); spawnShock(pDir.clone(), SKILL_RANGE * 0.62, 0xffd23a);
+  for (let i = 0; i < 18; i++) {
+    const a = i / 18 * Math.PI * 2, out = tangentDir(a);
+    const sp = emberSprite(i % 2 ? 0xff7a2a : 0xffd23a); sp.scale.setScalar(1.4);
+    sp.position.copy(player.position).addScaledVector(out, 1.0 + Math.random()).addScaledVector(_up, 0.4);
+    const v = out.multiplyScalar(5).addScaledVector(_up, 4 + Math.random() * 3);
+    scene.add(sp); fxList.push({ sp, v, life: 0.5, max: 0.5 });
+  }
+}
+// 衝撃波：雷の折線
+const boltMat = new THREE.LineBasicMaterial({ color: 0x9fe8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+function spawnLightning(r) {
+  spawnShock(pDir.clone(), r, 0x7fd8ff);
+  for (let i = 0; i < 8; i++) {
+    const a = i / 8 * Math.PI * 2 + Math.random() * 0.2, out = tangentDir(a), side = _up.clone().cross(out).normalize();
+    const pts = [], steps = 6;
+    for (let s = 0; s <= steps; s++) { const d = s / steps; pts.push(player.position.clone().addScaledVector(out, d * r).addScaledVector(_up, 0.6).addScaledVector(side, (Math.random() - 0.5) * 1.0 * (s && s < steps ? 1 : 0))); }
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), boltMat.clone());
+    pushMeshFx(line, 0.22, { op0: 1 });
+  }
+}
+// 必殺：昇天の光柱
+function spawnPillar() {
+  const cyl = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.4, 16, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe07a, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  cyl.position.copy(surfPos(pDir, 8)); cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), pDir);
+  pushMeshFx(cyl, 0.7, { op0: 0.7, grow: 1.1 });
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.9, 16, 12, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff7c8, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  core.position.copy(cyl.position); core.quaternion.copy(cyl.quaternion); pushMeshFx(core, 0.6, { op0: 0.9, grow: 0.4 });
+  spawnShock(pDir.clone(), 30, 0xffe07a); spawnShock(pDir.clone(), 16, 0xfff7c8);
+  for (let i = 0; i < 26; i++) {
+    const sp = emberSprite(i % 3 ? 0xffe07a : 0xfff7c8); sp.scale.setScalar(1.6);
+    sp.position.copy(player.position).addScaledVector(_up, Math.random() * 7);
+    const out = tangentDir(Math.random() * Math.PI * 2);
+    const v = out.multiplyScalar(2 + Math.random() * 4).addScaledVector(_up, 4 + Math.random() * 7);
+    scene.add(sp); fxList.push({ sp, v, life: 0.6, max: 0.6 });
+  }
 }
 
 // ============================================================ 掉落物（コイン/ハート/ジェム）
@@ -999,7 +1053,7 @@ function doAttack() {
 }
 function switchWeapon() {
   if (!bowUnlocked) { showArea('弓は スキルツリーで習得', 'LOCKED'); return; }
-  weapon = weapon === 'sword' ? 'bow' : 'sword'; Audio.sfx('cursor');
+  weapon = weapon === 'sword' ? 'bow' : 'sword'; Audio.sfx('cursor'); playerModel.setWeapon(weapon);
   showArea(weapon === 'bow' ? '弓に持ち替えた' : '剣に持ち替えた', weapon.toUpperCase());
 }
 function ringDamage(r, dmg, color, knock, applyStatus) {
@@ -1019,13 +1073,15 @@ function ringDamage(r, dmg, color, knock, applyStatus) {
     if (e.hp <= 0) killEnemy(e);
   }
 }
-function castSpin() {   // 旋回斬り: 中範囲・高火力・灼熱
+function castSpin() {   // 旋回斬り: 中範囲・高火力・灼熱（炎の旋風）
   skillT = SKILL_DUR; invulnT = Math.max(invulnT, 0.35); Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
-  spawnImpact(player.position.clone().addScaledVector(pDir, 1.0), 0xbf8aff, 14);
-  ringDamage(SKILL_RANGE, Math.round((22 + hero.level * 3 + atkBonus * 2 + gearBonus.atk * 2) * skillDmgMul()), 0xbf8aff, 0.12, 'burn');
+  spawnImpact(player.position.clone().addScaledVector(pDir, 1.0), 0xff8a2a, 14);
+  spawnFireWhirl();
+  ringDamage(SKILL_RANGE, Math.round((22 + hero.level * 3 + atkBonus * 2 + gearBonus.atk * 2) * skillDmgMul()), 0xff7a2a, 0.12, 'burn');
 }
-function castShock() {  // 衝撃波: 広範囲・低火力・大ノックバック
+function castShock() {  // 衝撃波: 広範囲・低火力・大ノックバック（雷撃）
   Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.25);
+  spawnLightning(7.5);
   ringDamage(7.5, Math.round((14 + hero.level * 2 + atkBonus + gearBonus.atk) * skillDmgMul()), 0x7fd8ff, 0.3, 'freeze');
 }
 function castHeal() {   // 治癒: 大回復＋短い無敵
@@ -1357,7 +1413,7 @@ function doUlt() {
   if (gameState !== 'field' || ult < 100) return;
   ult = 0; updateUltUI(); meta.stats.ults++; checkAch();
   slowMo = Math.max(slowMo, 1.2); invulnT = Math.max(invulnT, 1.4); shakeT = Math.max(shakeT, 0.6); critFlash();
-  Audio.sfx('victory'); spawnShock(pDir.clone(), 30, 0xffd23a);
+  Audio.sfx('victory'); spawnPillar();
   const dmg = Math.round((60 + hero.level * 8 + atkBonus * 3) * (1 + Math.min(hitCombo, 50) * 0.02) * skillDmgMul() * mPlayerDmg);
   for (const e of enemies) {
     if (!e.alive) continue; if (e.isBoss && e.invT > 0) continue;
@@ -1602,6 +1658,7 @@ function beginRun() {
   resetRunMods(); if (pendingMuts) { applyMuts(pendingMuts); dailyMode = pendingDaily; } // 変異/日替わり
   applyMeta();                          // メタ強化を反映（HP/攻撃/移動/弓/復活/金運）
   applyClass();                         // 職業を反映（HP/攻撃/弓/暴撃/CD/スキル2）
+  playerModel.setClass(currentClass); playerModel.setWeapon(weapon); // 見た目（職業・武器）
   hero.maxHp = Math.max(1, Math.round(hero.maxHp * mPlayerHp)); hero.hp = hero.maxHp; // 変異HP補正
   recomputeStats(); renderRelicBar();   // 遺物（最初は空）込みで再計算
   runNodes = ['start']; renderStarmap(); discover('cls', currentClass); meta.stats.runs++;
@@ -2270,6 +2327,14 @@ function update(dt, t) {
   if (skillT > 0) player.rotateOnAxis(UPVEC, (1 - skillT / SKILL_DUR) * Math.PI * 5); // スキル中はスピン
   const attackP = attackT > 0 ? (1 - attackT / ATTACK_DUR) : 0;
   playerModel.update(dt, playerMoving && jumpH < 0.1, dash ? 1.4 : 1.0, attackP);
+  // 武器の挥砍トレイル（剣/杖の刃先に追従する光の残像）
+  if (skillT > 0 || (attackT > 0 && weapon !== 'bow')) {
+    playerModel.tip.getWorldPosition(_tipW);
+    const col = skillT > 0 ? 0xff8a2a : (currentClass === 'mage' ? 0xbf8aff : 0xcfe6ff);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+    sp.position.copy(_tipW); sp.scale.setScalar(skillT > 0 ? 1.7 : 1.25);
+    scene.add(sp); fxList.push({ sp, v: new THREE.Vector3(), life: 0.16, max: 0.16 });
+  }
   player.visible = !(hurtFlash > 0 && Math.floor(t * 22) % 2 === 0); // 受傷時だけ点滅（ダッシュでは点滅しない）
   if (dashT > 0 && Math.floor(t * 60) % 2 === 0) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x7fd8ff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); sp.position.copy(player.position).addScaledVector(_up, 1.0); sp.scale.setScalar(2.2); scene.add(sp); fxList.push({ sp, v: new THREE.Vector3(), life: 0.26, max: 0.26 }); } // ダッシュの残像トレイル
 
