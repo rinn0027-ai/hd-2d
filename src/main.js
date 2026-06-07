@@ -603,7 +603,37 @@ composer.addPass(new OutputPass());
 
 // ============================================================ ゲーム状態 / ステータス
 let gameState = 'field';                 // 'field' | 'dialogue'
-const hero = { hp: 100, maxHp: 100, exp: 0, level: 1, potions: 1 };
+const hero = { hp: 100, maxHp: 100, exp: 0, level: 1, potions: 1, burn: 0, poison: 0 };
+// ---- プレイヤーの状態異常（環境ハザード由来）＋ HUDアイコン ----
+function applyPlayerStatus(type, dur) { if (hero[type] !== undefined) hero[type] = Math.max(hero[type] || 0, dur); }
+let pdotT = 0;
+function playerDot(dt) {
+  if (hero.burn > 0) hero.burn -= dt; if (hero.poison > 0) hero.poison -= dt;
+  if ((hero.burn > 0 || hero.poison > 0) && dashT <= 0) {
+    pdotT -= dt;
+    if (pdotT <= 0) { pdotT = 0.6; const d = (hero.burn > 0 ? 3 : 0) + (hero.poison > 0 ? 2 : 0); if (d > 0 && hero.hp > 1) { hero.hp = Math.max(1, hero.hp - d); hurtFlash = Math.max(hurtFlash, 0.12); updateHUD(); } }
+  }
+}
+const pstatusEl = document.getElementById('pstatus');
+let _pstatusPrev = '';
+function renderPStatus() {
+  let s = '';
+  if (hero.burn > 0) s += '<span title="灼熱">🔥</span>';
+  if (hero.poison > 0) s += '<span title="毒">☠️</span>';
+  if (invulnT > 0) s += '<span title="無敵">🛡️</span>';
+  if (dashT > 0 || relicCount('swift')) s += '<span title="疾風">💨</span>';
+  if (ult >= 100) s += '<span title="必殺準備OK">⚡</span>';
+  if (s !== _pstatusPrev) { pstatusEl.innerHTML = s; _pstatusPrev = s; }
+}
+// ---- 遺物の身まといオーラ（火/氷/吸血を所持で粒子をまとう）----
+let auraT = 0;
+function updatePlayerAura(dt) {
+  auraT -= dt; if (auraT > 0) return; auraT = 0.16;
+  const emit = (col, up) => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); const a = Math.random() * Math.PI * 2; sp.position.copy(player.position).addScaledVector(_fwd, Math.cos(a) * 0.9).addScaledVector(_right, Math.sin(a) * 0.9).addScaledVector(_up, 0.6 + Math.random() * 0.8); sp.scale.setScalar(0.8 + Math.random() * 0.5); scene.add(sp); fxList.push({ sp, v: _up.clone().multiplyScalar(up), life: 0.4, max: 0.4 }); };
+  if (relicCount('fire')) emit(0xff7a2a, 2.2);
+  if (relicCount('frost')) emit(0x9fe0ff, 1.4);
+  if (relicCount('vamp')) emit(0xff5a6a, 1.6);
+}
 function expToNext(lv) { return 20 + lv * 18; }
 
 // ============================================================ 対話システム（タイプライタ）
@@ -688,7 +718,19 @@ function freeDir(awayFromPlayer = true) {
   for (let k = 0; k < 24; k++) { d = randDir(); if ((!awayFromPlayer || pDir.dot(d) < 0.5) && !nearObstacle(d, 0.05)) break; }
   return d;
 }
-const ELITE_AFFIX = ['tough', 'enrage', 'split'];
+const ELITE_AFFIX = ['tough', 'enrage', 'split', 'bomb', 'summon', 'shield'];
+const AFFIX_COL = { tough: 0xb0b8c8, enrage: 0xff6a3a, split: 0x9ad84a, bomb: 0xff3a3a, summon: 0xc78aff, shield: 0x7fd8ff };
+// 与ダメ時にシールドを優先消費（盾持ち）
+function absorbShield(e, dmg) {
+  if (!e.shield || e.shield <= 0) return dmg;
+  const a = Math.min(e.shield, dmg); e.shield -= a; dmg -= a;
+  if (e.shieldMesh) {
+    e.shieldMesh.material.opacity = 0.12 + 0.3 * (e.shield / e.shieldMax);
+    if (e.shield <= 0) { e.model.root.remove(e.shieldMesh); e.shieldMesh.geometry.dispose(); e.shieldMesh.material.dispose(); e.shieldMesh = null; spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1), 0x7fd8ff, 10); Audio.sfx('hit'); }
+  }
+  if (dmg <= 0) showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), 'GUARD');
+  return dmg;
+}
 function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1, isChild = false) {
   const def = ENEMY_DEF[key];
   discover('enemy', key);
@@ -705,7 +747,16 @@ function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1, isChild = false) {
   scene.add(e.root);
   const hp = def.hp * hpScale * planetMul * (elite ? 2.6 : 1) * mEnemyHp * ngMul;
   const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp, maxHp: hp, atk: def.atk * planetMul * (elite ? 1.5 : 1) * mEnemyAtk * ngMul, alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats, childScale, escale, elite, affix: elite ? ELITE_AFFIX[Math.floor(Math.random() * ELITE_AFFIX.length)] : null, burn: 0, poison: 0, freeze: 0 };
-  if (elite) { const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffd27a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 })); aura.scale.setScalar(3.2); aura.position.y = e.height ? e.height * 0.5 : 1; e.root.add(aura); }
+  if (elite) {
+    const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: AFFIX_COL[en.affix] || 0xffd27a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 }));
+    aura.scale.setScalar(3.2); aura.position.y = e.height ? e.height * 0.5 : 1; e.root.add(aura);
+    if (en.affix === 'summon') en.summonCD = 3 + Math.random();
+    if (en.affix === 'shield') {
+      en.shieldMax = en.maxHp * 0.6; en.shield = en.shieldMax;
+      const sh = new THREE.Mesh(new THREE.SphereGeometry((e.height ? e.height * 0.55 : 1.3), 14, 10), new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide }));
+      sh.position.y = e.height ? e.height * 0.5 : 1; e.root.add(sh); en.shieldMesh = sh;
+    }
+  }
   enemies.push(en); return en;
 }
 function spawnBoss(n) {
@@ -947,7 +998,7 @@ function updateArrowsP(dt) {
         if (bossBarrier(e)) { hit = true; break; }
         const crit = Math.random() < critTotal(); let tot = crit ? p.dmg * 2 : p.dmg;
         if (e.affix === 'tough') tot = Math.round(tot * 0.6);
-        tot = Math.round(tot * mPlayerDmg);
+        tot = Math.round(tot * mPlayerDmg); tot = absorbShield(e, tot);
         e.hp -= tot; e.hitFlash = 0.18; registerHit(); if (crit) critFlash();
         if (Math.random() < 0.4) addStatus(e, 'poison', 4);   // 弓で毒
         if (relicCount('fire')) addStatus(e, 'burn', 3);
@@ -1101,7 +1152,7 @@ function ringDamage(r, dmg, color, knock, applyStatus) {
     if (!e.alive) continue;
     if (pDir.dot(e.dir) < co) continue;
     if (bossBarrier(e)) continue;
-    e.hp -= e.affix === 'tough' ? Math.round(dmg * 0.6) : dmg; e.hitFlash = 0.2; registerHit();
+    e.hp -= absorbShield(e, e.affix === 'tough' ? Math.round(dmg * 0.6) : dmg); e.hitFlash = 0.2; registerHit();
     if (applyStatus) addStatus(e, applyStatus, 3);
     if (relicCount('fire')) addStatus(e, 'burn', 3);
     showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), dmg, 'crit');
@@ -1185,6 +1236,12 @@ function killEnemy(e) {
     spawnImpact(e.model.root.position.clone(), over ? 0xff6a3a : 0xffae3a, over ? 18 : 12); spawnShock(e.dir.clone(), rr, over ? 0xff6a3a : 0xffae3a);
     const cco = Math.cos(rr / PLANET_R);
     for (const o of enemies) if (o !== e && o.alive && !(o.isBoss && o.invT > 0) && e.dir.dot(o.dir) > cco) { o.hp -= cd; o.hitFlash = 0.2; if (o.hp <= 0) killEnemy(o); }
+  }
+  if (e.affix === 'bomb') {                                    // 自爆: 死亡時に大爆発
+    spawnImpact(e.model.root.position.clone(), 0xff5a20, 20); spawnShock(e.dir.clone(), 5.5, 0xff3a3a); shakeT = Math.max(shakeT, 0.38); Audio.sfx('kill');
+    const bco = Math.cos(5.5 / PLANET_R);
+    if (pDir.dot(e.dir) > bco) hurtPlayer(Math.round(e.atk * 1.4), e.dir);
+    for (const o of enemies) if (o !== e && o.alive && !(o.isBoss && o.invT > 0) && e.dir.dot(o.dir) > bco) { o.hp -= Math.round(22 + hero.level * 2); o.hitFlash = 0.2; if (o.hp <= 0) killEnemy(o); }
   }
   score += Math.round((e.def.score || 10) * planetMul * em);
   spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.0), e.elite ? 0xffd27a : 0xffd27a, e.elite ? 18 : 10);
@@ -1687,12 +1744,13 @@ function clearRun() {
   for (const ar of arrows) removeAndDispose(ar.mesh); arrows.length = 0;
   for (const a of aoes) removeAndDispose(a.grp); aoes.length = 0;
   for (const m of meteorFx) { removeAndDispose(m.rock); removeAndDispose(m.tg); } meteorFx.length = 0;
+  for (const w of warns) removeAndDispose(w.grp); warns.length = 0;
   meteorWave = false; nestWave = false; meteorT = 0;
 }
 function beginRun() {
   goEl.style.display = 'none'; titleEl.style.display = 'none';
   clearRun();
-  hero.exp = 0; hero.level = 1;
+  hero.exp = 0; hero.level = 1; hero.burn = 0; hero.poison = 0;
   atkCdMul = 1; dashCdMul = 1; skillCdMul = 1; skillPoints = 0;
   bowPower = 0; for (const nd of TREE_NODES) nd.lv = 0;
   equippedGear = null; recomputeGear(); airSlam = false; dashAttack = false; gravMul = 1;
@@ -1750,8 +1808,8 @@ document.getElementById('pauseTitle').addEventListener('click', () => { pauseEl.
 // ============================================================ ボスの範囲攻撃（地面の赤円→爆発）
 const aoes = [];
 const aoeRingGeo = new THREE.RingGeometry(0.82, 1.0, 36); SHARED_GEO.add(aoeRingGeo);
-const aoeFillGeo = new THREE.CircleGeometry(1.0, 36);
-function spawnAoe(dir, r, dmg, color = 0xff3a3a) {
+const aoeFillGeo = new THREE.CircleGeometry(1.0, 36); SHARED_GEO.add(aoeFillGeo);
+function spawnAoe(dir, r, dmg, color = 0xff3a3a, status = null) {
   const grp = new THREE.Group();
   const ring = new THREE.Mesh(aoeRingGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }));
   const fill = new THREE.Mesh(aoeFillGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }));
@@ -1759,7 +1817,26 @@ function spawnAoe(dir, r, dmg, color = 0xff3a3a) {
   grp.position.copy(surfPos(dir, 0.15));
   grp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
   scene.add(grp);
-  aoes.push({ grp, ring, fill, dir: dir.clone().normalize(), r, t: 1.1, max: 1.1, dmg });
+  aoes.push({ grp, ring, fill, dir: dir.clone().normalize(), r, t: 1.1, max: 1.1, dmg, status });
+}
+// 敵の攻撃予兆（地面リング・ダメージなし。着弾は敵側の windup が処理）
+const warns = [];
+function spawnGroundWarn(dir, r, time, color = 0xff5050) {
+  const grp = new THREE.Group();
+  const ring = new THREE.Mesh(aoeRingGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+  const fill = new THREE.Mesh(aoeFillGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.05, side: THREE.DoubleSide, depthWrite: false }));
+  grp.add(ring, fill); grp.scale.setScalar(r);
+  grp.position.copy(surfPos(dir, 0.16)); grp.quaternion.setFromUnitVectors(_MZ, dir);
+  scene.add(grp);
+  warns.push({ grp, ring, fill, t: 0, time });
+}
+function updateWarns(dt) {
+  for (let i = warns.length - 1; i >= 0; i--) {
+    const w = warns[i]; w.t += dt; const k = Math.min(1, w.t / w.time);
+    w.ring.material.opacity = 0.45 + 0.45 * Math.abs(Math.sin(w.t * 18));
+    w.fill.material.opacity = 0.06 + 0.34 * k;     // 着弾に向けて満ちる
+    if (k >= 1) { removeAndDispose(w.grp); warns.splice(i, 1); }
+  }
 }
 // プレイヤー中心の即時AoEダメージ（スラム/ダッシュ斬りなど）
 function aoeDamage(r, dmg, color = 0xfff2c0) {
@@ -1769,7 +1846,7 @@ function aoeDamage(r, dmg, color = 0xfff2c0) {
   for (const e of enemies) {
     if (!e.alive) continue;
     if (pDir.dot(e.dir) < co) continue;
-    e.hp -= e.affix === 'tough' ? Math.round(dmg * 0.6) : dmg; e.hitFlash = 0.18;
+    e.hp -= absorbShield(e, e.affix === 'tough' ? Math.round(dmg * 0.6) : dmg); e.hitFlash = 0.18;
     showDmg(e.model.root.position.clone().addScaledVector(e.dir, e.isBoss ? 3 : 1.8), dmg, 'crit');
     _axis.crossVectors(e.dir, pDir).normalize(); e.dir.applyAxisAngle(_axis, -0.1).normalize();
     if (e.hp <= 0) killEnemy(e);
@@ -1780,7 +1857,7 @@ function planetHazard(dt, t) {
   const th = THEMES[themeIndex];
   if (th.hazard === 'lava') {
     hazardTimer -= dt;
-    if (hazardTimer <= 0) { hazardTimer = 2.6; for (let i = 0; i < 2; i++) { const d = pDir.clone().applyAxisAngle(randDir(), 0.1 + Math.random() * 0.3).normalize(); spawnAoe(d, 4.2, Math.round(10 * planetMul), 0xff5a20); } }
+    if (hazardTimer <= 0) { hazardTimer = 2.6; for (let i = 0; i < 2; i++) { const d = pDir.clone().applyAxisAngle(randDir(), 0.1 + Math.random() * 0.3).normalize(); spawnAoe(d, 4.2, Math.round(10 * planetMul), 0xff5a20, 'burn'); } }
   } else if (th.hazard === 'ice') {
     hazardTimer -= dt;
     if (hazardTimer <= 0) { hazardTimer = 3.2; const d = pDir.clone().applyAxisAngle(randDir(), 0.15 + Math.random() * 0.3).normalize(); spawnAoe(d, 4.0, Math.round(9 * planetMul), 0x9fe0ff); }
@@ -1789,7 +1866,7 @@ function planetHazard(dt, t) {
     if (hazardTimer <= 0) { hazardTimer = 2.8; for (let i = 0; i < 2; i++) { const d = pDir.clone().applyAxisAngle(randDir(), 0.15 + Math.random() * 0.4).normalize(); spawnAoe(d, 4.6, Math.round(9 * planetMul), 0xe6c98a); } }
   } else if (th.hazard === 'poison') {      // 毒沼: 毒のしぶき
     hazardTimer -= dt;
-    if (hazardTimer <= 0) { hazardTimer = 3.0; const d = pDir.clone().applyAxisAngle(randDir(), 0.1 + Math.random() * 0.35).normalize(); spawnAoe(d, 4.2, Math.round(8 * planetMul), 0x7ad04a); }
+    if (hazardTimer <= 0) { hazardTimer = 3.0; const d = pDir.clone().applyAxisAngle(randDir(), 0.1 + Math.random() * 0.35).normalize(); spawnAoe(d, 4.2, Math.round(8 * planetMul), 0x7ad04a, 'poison'); }
   } else if (th.hazard === 'heal') {        // 草原: ゆっくり回復
     regenT -= dt; if (regenT <= 0 && hurtFlash <= 0) { regenT = 1; hero.hp = Math.min(hero.maxHp, hero.hp + 1); updateHUD(); }
   }
@@ -1830,7 +1907,7 @@ function updateAoes(dt) {
     if (a.t <= 0) {
       spawnImpact(surfPos(a.dir, 0.6), 0xff5a3a, 16); shakeT = Math.max(shakeT, 0.32);
       const ang = Math.acos(THREE.MathUtils.clamp(pDir.dot(a.dir), -1, 1)) * PLANET_R;
-      if (ang < a.r) hurtPlayer(a.dmg, a.dir);
+      if (ang < a.r) { hurtPlayer(a.dmg, a.dir); if (a.status) applyPlayerStatus(a.status, 3); }
       removeAndDispose(a.grp); aoes.splice(i, 1);
     }
   }
@@ -2334,7 +2411,7 @@ function combatUpdate(dt, t) {
       if (dashAttack) dmg = Math.floor(dmg * 1.4);
       const crit = Math.random() < critTotal(); let tot = crit ? dmg * 2 : dmg;
       if (e.affix === 'tough') tot = Math.round(tot * 0.6);
-      tot = Math.round(tot * mPlayerDmg);
+      tot = Math.round(tot * mPlayerDmg); tot = absorbShield(e, tot);
       e.hp -= tot; e.hitFlash = 0.18; registerHit();
       if (comboHeavy) addStatus(e, 'freeze', 1.5);            // 3段で凍結
       if (relicCount('fire')) addStatus(e, 'burn', 3);
@@ -2368,12 +2445,29 @@ function combatUpdate(dt, t) {
     const angDist = Math.acos(d) * PLANET_R;
     const bh = e.def.behavior;
     const frz = (e.freeze > 0 ? 0.4 : 1) * ((e.affix === 'enrage' && e.hp < e.maxHp * 0.4) ? 1.7 : 1) * (e.enrageMul || 1) * mEnemySpeed; // 凍結減速 / 狂暴・怒り加速 / 変異速度
+    if ((e.windup || 0) > 0) {                               // 攻撃の予備動作中：その場で構えて着弾を待つ
+      e.windup -= dt;
+      let bobw = (e.def.hover ? 0.3 : 0.12) * Math.sin(e.bobT * 2.2);
+      if (e.isBoss && e.slamT > 0) { e.slamT -= dt; bobw += Math.sin((1 - e.slamT / 0.5) * Math.PI) * 1.2; }
+      e.model.root.position.copy(surfPos(e.dir, e.def.hover + bobw));
+      _md.copy(pDir).addScaledVector(e.dir, -d); orientStanding(e.model.root, e.dir, _md.lengthSq() > 1e-6 ? _md : heading);
+      if (e.windup <= 0) {                                   // 着弾：予兆円の中なら命中（外に逃げれば回避）
+        const sa = Math.acos(THREE.MathUtils.clamp(pDir.dot(e.windupDir), -1, 1)) * PLANET_R;
+        if (e.isBoss) { shakeT = Math.max(shakeT, 0.4); spawnImpact(surfPos(e.windupDir, 0.5), 0xff7e6a, 16); spawnShock(e.windupDir.clone(), e.windupR, 0xff5a20); }
+        if (sa < e.windupR) hurtPlayer(e.atk, e.windupDir);
+      }
+      continue;
+    }
     if (e.isBoss) {
       if (e.invT > 0) e.invT -= dt;
       if (e.phase < 2 && e.hp <= e.maxHp * 0.66) enterBossPhase(e, 2);        // フェーズ移行
       else if (e.phase < 3 && e.hp <= e.maxHp * 0.33) enterBossPhase(e, 3);
       e.castCD = (e.castCD || 3) - dt; if (e.castCD <= 0 && angDist < 24) { e.castCD = 4.2 / e.enrageMul; bossCast(e); }
       if (e.phase >= 3) { e.addCD -= dt; if (e.addCD <= 0) { e.addCD = 7; summonAdds(e, 2); } } // 終盤は雑魚召喚
+    }
+    if (e.affix === 'summon' && !e.isBoss) {                 // 召喚士: 雑魚を呼ぶ
+      e.summonCD -= dt;
+      if (e.summonCD <= 0 && enemies.length < 38) { e.summonCD = 5 + Math.random() * 2; const sd = e.dir.clone().applyAxisAngle(randDir(), 0.12 + Math.random() * 0.06).normalize(); spawnEnemyDef('slime', sd, 0.5, 0.7, true); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1), 0xc78aff, 8); }
     }
     if (angDist < e.def.aggro) {
       if (bh === 'caster') {                              // 詠唱: 距離を取りつつ弾を撃つ
@@ -2383,13 +2477,16 @@ function combatUpdate(dt, t) {
         if (e.atkCD <= 0) { e.atkCD = 2.0; spawnProjectile(e.dir.clone(), pDir.clone(), e.atk); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 1.4), 0xc78aff, 4); }
       } else if (angDist > e.def.atkRange) {              // 追尾（突進敵は接近時バースト）
         if (bh === 'charge' && e.atkCD <= 0 && angDist < e.def.aggro * 0.7) { e.chargeT = 0.5; e.atkCD = 2.4; }
-        const sp = e.def.speed * frz * (e.chargeT > 0 ? 2.6 : 1);
+        const sp = e.def.speed * frz * (e.chargeT > 0 ? 2.6 : 1) * (e.affix === 'bomb' ? 1.5 : 1);
         _axis.crossVectors(e.dir, pDir).normalize();
         e.dir.applyAxisAngle(_axis, Math.min(sp * dt / PLANET_R, angDist / PLANET_R)).normalize();
-      } else if (e.atkCD <= 0) {                          // 近接攻撃
-        if (e.isBoss) { e.atkCD = 2.2; e.slamT = 0.5; shakeT = Math.max(shakeT, 0.4); spawnImpact(e.model.root.position.clone().addScaledVector(e.dir, 0.5), 0xff7e6a, 16); }
-        else e.atkCD = 1.3;
-        hurtPlayer(e.atk, e.dir);
+      } else if (e.atkCD <= 0) {                          // 近接攻撃：予兆を出してから着弾
+        e.windup = e.isBoss ? 0.6 : 0.46;
+        e.windupDir = pDir.clone();
+        e.windupR = e.isBoss ? 5.0 : 2.7;
+        e.atkCD = e.isBoss ? 2.4 : 1.5;
+        if (e.isBoss) e.slamT = 0.5;
+        spawnGroundWarn(e.windupDir, e.windupR, e.windup, e.isBoss ? 0xff5a20 : 0xff5050);
       }
     } else if (!e.isBoss) {                                // 徘徊
       if (!e.wander || e.wanderCD <= 0) { e.wander = randDir(); e.wanderCD = 2 + Math.random() * 2; }
@@ -2455,8 +2552,10 @@ function update(dt, t) {
     updateProjectiles(dt);
     updateArrowsP(dt);
     updateAoes(dt);
+    updateWarns(dt);
     updatePickups(dt);
     planetHazard(dt, t);
+    playerDot(dt); updatePlayerAura(dt); renderPStatus();
     // ウェーブ進行：全滅したら少し待って次のウェーブ
     if (waveBreak > 0) { waveBreak -= dt; if (waveBreak <= 0) { if ((wave + 1) % 5 === 0) startWave(wave + 1); else openNodePick(); } }
     else if (enemies.length === 0) {

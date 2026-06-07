@@ -154,6 +154,9 @@
     #hud .hpbar { height: 12px; border-radius: 6px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.18); overflow: hidden; }
     #hud .hpbar > i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg,#3ad17a,#7ef0a0); transition: width .2s; }
     #hud .hptxt { font-size: 11px; opacity: .8; margin-top: 2px; }
+    #pstatus { font-size: 14px; letter-spacing: 1px; }
+    #pstatus span { display: inline-block; filter: drop-shadow(0 1px 1px #000); animation: stpulse 1s ease-in-out infinite; }
+    @keyframes stpulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
 
     /* 敵HPバー（頭上） */
     #ebars { position: fixed; inset: 0; z-index: 8; pointer-events: none; }
@@ -422,7 +425,7 @@
   <div id="hud" class="gfont">
     <div class="lv"><span id="hudLv">Lv 1</span> &nbsp; <span id="hudExp" style="opacity:.7"></span></div>
     <div class="hpbar"><i id="hudHp"></i></div>
-    <div class="hptxt"><span id="hudHpTxt"></span></div>
+    <div class="hptxt"><span id="hudHpTxt"></span> <span id="pstatus"></span></div>
     <div class="lv" style="margin-top:6px"><span id="hudWave" style="color:#ffd27a"></span> &nbsp; <span id="hudScore"></span> &nbsp; <span id="hudCoins" style="color:#ffd23a"></span></div>
     <div class="hptxt" id="hudCd" style="margin-top:4px"></div>
   </div>
