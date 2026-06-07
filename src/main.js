@@ -190,20 +190,30 @@ scene.add(planet);
 
 // ============================================================ 惑星テーマ（多惑星ワープ）
 const THEMES = [
-  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null,     emissive: 0x000000, emI: 0,    snow: false, grav: 1,   hazard: 'heal', pool: ['slime', 'bat', 'mushroom', 'splitter'], bossKind: 'slime', bossName: 'スライム王 KING SLIME' },
-  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xeaf4ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff, emissive: 0x223344, emI: 0.12, snow: true,  grav: 1,   hazard: 'ice',  pool: ['crystal', 'bat', 'splitter', 'crystal'], bossKind: 'frost', bossName: 'フロストキング FROST KING' },
-  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff6a3a, fog: 0x3a1208, enemyTint: 0xff6a40, emissive: 0xff2200, emI: 0.55, snow: false, grav: 1.1, hazard: 'lava', pool: ['golem', 'mushroom', 'bat', 'golem'], bossKind: 'magma', bossName: 'マグマロード MAGMA LORD' },
-  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff, emissive: 0x6a1aff, emI: 0.32, snow: false, grav: 0.5, hazard: 'none', pool: ['eye', 'caster', 'splitter', 'eye'], bossKind: 'void', bossName: 'ヴォイドアイ VOID EYE' },
+  { name: '草原の星', en: 'GREEN PLANET', ground: 0xffffff, fog: 0x1a2238, enemyTint: null,     emissive: 0x000000, emI: 0,    snow: false, grav: 1,   hazard: 'heal',   weather: 'petals', timeBias: 0.5,  ambTint: 0xbfd4ff, grassTint: 0xffffff, pool: ['slime', 'bat', 'mushroom', 'splitter'], bossKind: 'slime', bossName: 'スライム王 KING SLIME' },
+  { name: '雪の星',   en: 'SNOW PLANET',  ground: 0xeaf4ff, fog: 0x2a3a52, enemyTint: 0x9fd0ff, emissive: 0x223344, emI: 0.12, snow: true,  grav: 1,   hazard: 'ice',    weather: 'snow',   timeBias: 0.6,  ambTint: 0xd6e8ff, grassTint: 0xc8dcf2, pool: ['crystal', 'bat', 'splitter', 'crystal'], bossKind: 'frost', bossName: 'フロストキング FROST KING' },
+  { name: '溶岩の星', en: 'LAVA PLANET',  ground: 0xff6a3a, fog: 0x3a1208, enemyTint: 0xff6a40, emissive: 0xff2200, emI: 0.55, snow: false, grav: 1.1, hazard: 'lava',   weather: 'embers', timeBias: 0.8,  ambTint: 0xffb38a, grassTint: 0x8a5236, pool: ['golem', 'mushroom', 'bat', 'golem'], bossKind: 'magma', bossName: 'マグマロード MAGMA LORD' },
+  { name: '砂漠の星', en: 'DESERT PLANET', ground: 0xe8c878, fog: 0xcaa45a, enemyTint: 0xe0b070, emissive: 0x6a4a10, emI: 0.1, snow: false, grav: 0.95, hazard: 'sand',  weather: 'sand',   timeBias: 0.48, ambTint: 0xffe6b0, grassTint: 0xd9bb74, pool: ['golem', 'bat', 'mushroom', 'splitter'], bossKind: 'magma', bossName: 'サンドワーム SAND WORM' },
+  { name: '毒沼の星', en: 'TOXIC SWAMP',  ground: 0x5a7a4a, fog: 0x24381e, enemyTint: 0x8ab86a, emissive: 0x1a3a10, emI: 0.2,  snow: false, grav: 1,   hazard: 'poison', weather: 'spores', timeBias: 0.34, ambTint: 0x9fc080, grassTint: 0x6f9a52, pool: ['mushroom', 'slime', 'eye', 'splitter'], bossKind: 'slime', bossName: '腐敗の王 ROT KING' },
+  { name: '異界の星', en: 'ALIEN PLANET', ground: 0xc090ff, fog: 0x2a1840, enemyTint: 0x9a6aff, emissive: 0x6a1aff, emI: 0.32, snow: false, grav: 0.5, hazard: 'none', weather: 'aurora', timeBias: 0.06, ambTint: 0xb89aff, grassTint: 0xb89aff, pool: ['eye', 'caster', 'splitter', 'eye'], bossKind: 'void', bossName: 'ヴォイドアイ VOID EYE' },
 ];
+const LAST_THEME = THEMES.length - 1;
 let themeIndex = 0, planetMul = 1;
 const fogTheme = new THREE.Color(0x1a2238);
 function applyTheme(i) {
   const th = THEMES[i];
   grassMat.color.set(th.ground);
   grassMat.emissive.set(th.emissive); grassMat.emissiveIntensity = th.emI;
+  if (th.grassTint && typeof grassU !== 'undefined') grassU.uTint.value.set(th.grassTint);   // 草ブレードも星色に
   fogTheme.set(th.fog);
   gravMul = th.grav; hazardTimer = 3;
-  if (typeof snow !== 'undefined' && snow) snow.visible = th.snow;
+  // 星ごとの天候を自動適用
+  for (const k in WEATHER_PTS) WEATHER_PTS[k].visible = false;
+  if (th.weather && WEATHER_PTS[th.weather]) WEATHER_PTS[th.weather].visible = true;
+  weather = 'none';
+  // 星ごとの時刻・光
+  if (typeof th.timeBias === 'number') { timeOfDay = th.timeBias; applyTimeOfDay(timeOfDay); }
+  if (th.ambTint && typeof ambient !== 'undefined') ambient.color.set(th.ambTint);
 }
 // 空に浮かぶ他の惑星（装飾）
 for (let i = 0; i < 5; i++) {
@@ -253,7 +263,7 @@ const bladeGeo = new THREE.PlaneGeometry(1, 1);
 bladeGeo.translate(0, 0.5, 0); // 根本を原点に
 const aPhase = new Float32Array(COUNT);
 bladeGeo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(aPhase, 1));
-const grassU = { uTime: { value: 0 }, uMap: { value: grassBladeTex } };
+const grassU = { uTime: { value: 0 }, uMap: { value: grassBladeTex }, uTint: { value: new THREE.Color(0xffffff) } };
 const grassMatI = new THREE.ShaderMaterial({
   uniforms: grassU, transparent: true, depthWrite: true,
   vertexShader: /* glsl */`
@@ -267,11 +277,11 @@ const grassMatI = new THREE.ShaderMaterial({
       gl_Position = projectionMatrix * viewMatrix * wp;
     }`,
   fragmentShader: /* glsl */`
-    varying vec2 vUv; varying float vY; uniform sampler2D uMap;
+    varying vec2 vUv; varying float vY; uniform sampler2D uMap; uniform vec3 uTint;
     void main(){
       vec4 t = texture2D(uMap, vUv);
       if(t.a < 0.5) discard;
-      gl_FragColor = vec4(t.rgb * (0.6 + vY*0.5), 1.0);
+      gl_FragColor = vec4(t.rgb * uTint * (0.6 + vY*0.5), 1.0);
     }`
 });
 const grassInst = new THREE.InstancedMesh(bladeGeo, grassMatI, COUNT);
@@ -354,13 +364,13 @@ function makeWeather(tex, count, opts) {
   geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false,
-    uniforms: { uTime: { value: 0 }, uMap: { value: tex }, uSize: { value: opts.size * renderer.getPixelRatio() }, uFall: { value: opts.fall }, uSway: { value: opts.sway } },
+    uniforms: { uTime: { value: 0 }, uMap: { value: tex }, uSize: { value: opts.size * renderer.getPixelRatio() }, uFall: { value: opts.fall }, uSway: { value: opts.sway }, uTint: { value: new THREE.Color(opts.tint || 0xffffff) }, uRise: { value: opts.rise ? 1 : 0 } },
     vertexShader: /* glsl */`
-      attribute float aSeed; uniform float uTime,uSize,uFall,uSway; varying float vR;
+      attribute float aSeed; uniform float uTime,uSize,uFall,uSway,uRise; varying float vR;
       void main(){
         vec3 p = position;
         float life = mod(uTime*uFall + aSeed*7.0, 18.0);
-        p.y = 18.0 - life;                                   // 落下
+        p.y = mix(18.0 - life, life, uRise);                 // 落下 / 上昇
         p.x += sin(uTime*0.8 + aSeed)*uSway + uTime*uSway*0.3;
         p.z += cos(uTime*0.6 + aSeed*1.7)*uSway;
         p.x = mod(p.x + 15.0, 30.0) - 15.0;
@@ -371,14 +381,14 @@ function makeWeather(tex, count, opts) {
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */`
-      uniform sampler2D uMap; varying float vR;
+      uniform sampler2D uMap; uniform vec3 uTint; varying float vR;
       void main(){
         vec2 uv = gl_PointCoord - 0.5;
         float s = sin(vR), c = cos(vR);
         uv = mat2(c,-s,s,c) * uv + 0.5;                       // 回転
         vec4 t = texture2D(uMap, uv);
         if (t.a < 0.05) discard;
-        gl_FragColor = t;
+        gl_FragColor = vec4(t.rgb * uTint, t.a);
       }`,
   });
   const pts = new THREE.Points(geo, mat);
@@ -389,7 +399,12 @@ function makeWeather(tex, count, opts) {
 const petals = makeWeather(P.petalSprite(), 320, { size: 26, fall: 1.3, sway: 1.1 });
 const rain = makeWeather(P.rainSprite(), 600, { size: 34, fall: 7.0, sway: 0.05 });
 const snow = makeWeather(P.snowSprite(), 460, { size: 16, fall: 2.4, sway: 0.7 }); // 雪の星で自動表示
-let weather = 'none'; // 'none' | 'petals' | 'rain'
+const embers = makeWeather(P.glowSprite(), 220, { size: 20, fall: 0.6, sway: 0.5, tint: 0xff7a2a, rise: true });   // 溶岩: 舞い上がる火の粉
+const spores = makeWeather(P.glowSprite(), 200, { size: 16, fall: 0.45, sway: 0.8, tint: 0x9ad84a, rise: true });  // 毒沼: 浮遊する胞子
+const sand = makeWeather(P.glowSprite(), 360, { size: 14, fall: 3.2, sway: 2.2, tint: 0xe6c98a });                 // 砂漠: 砂塵
+const aurora = makeWeather(P.glowSprite(), 140, { size: 30, fall: 0.3, sway: 1.6, tint: 0x9a6aff, rise: true });   // 異界: 漂う光
+const WEATHER_PTS = { petals, rain, snow, embers, spores, sand, aurora };
+let weather = 'none'; // 手動切替用（'none'|'petals'|'rain'）。各星のテーマ天候は applyTheme で自動設定
 
 // ============================================================ プレイヤー（3Dローポリ人型）
 const playerModel = M.makeHumanoid({ skin: 0xe8b88c, cloth: 0x3b86a8, pants: 0x2f4f6a, hat: 0xcaa45a });
@@ -1194,7 +1209,7 @@ function killEnemy(e) {
     for (let i = 0; i < 8; i++) dropPickup('coin', randDir().lerp(e.dir, 0.5).normalize());
     hero.hp = hero.maxHp; Audio.sfx('victory');
     showArea(THEMES[e.theme].bossName + ' 撃破！', 'BOSS DEFEATED');
-    if (e.theme === 3) {                                            // 異界ボス＝星系制覇 → 凱旋 or NG+
+    if (e.theme === LAST_THEME) {                                   // 異界ボス＝星系制覇 → 凱旋 or NG+
       meta.stats.cleared = true; checkAch();
       setTimeout(() => {
         if (gameState !== 'field') return;
@@ -1526,8 +1541,14 @@ function openNodePick() {
     rest:     { ic: '🏕️', nm: '休息地', ds: 'HP40%回復', pick: () => { pushNode('rest'); hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.4); updateHUD(); advanceWave(); } },
     shop:     { ic: '🛒', nm: '行商人', ds: '買い物して進む', pick: () => { pushNode('shop'); pendingAfterShop = true; chooserEl.style.display = 'none'; openShop(); } },
     treasure: { ic: '🎁', nm: '宝箱', ds: '遺物を獲得', pick: () => { pushNode('treasure'); offerRelics(() => advanceWave()); } },
+    // ---- ランダムイベント ----
+    meteor:   { ic: '☄️', nm: '流星雨', ds: '隕石の雨＋大量報酬', pick: () => { pushNode('meteor'); meteorWave = true; meteorT = 1.2; advanceWave(); } },
+    caravan:  { ic: '🐫', nm: '隊商', ds: '遺物を貰い買い物', pick: () => { pushNode('caravan'); offerRelics(() => { pendingAfterShop = true; openShop(); }); } },
+    nest:     { ic: '🥚', nm: '精英の巣', ds: '精英の群れ＋豪華報酬', pick: () => { pushNode('nest'); forceElite = 6; nestWave = true; advanceWave(); } },
   };
-  const pool = extras.filter(k => !(k === 'shop' && mNoShop));   // 貧窮: 商店ノード除外
+  let pool = extras.filter(k => !(k === 'shop' && mNoShop));   // 貧窮: 商店ノード除外
+  // 35%でイベントノードを1つ混ぜる
+  if (Math.random() < 0.35) { const ev = ['meteor', 'caravan', 'nest'][Math.floor(Math.random() * 3)]; pool[1] = ev; }
   const items = [NODES.battle, NODES[pool[0]], NODES[pool[1]]];
   showChooser('星図：次の地を選べ', items);
 }
@@ -1665,6 +1686,8 @@ function clearRun() {
   for (const pr of projectiles) removeAndDispose(pr.mesh); projectiles.length = 0;
   for (const ar of arrows) removeAndDispose(ar.mesh); arrows.length = 0;
   for (const a of aoes) removeAndDispose(a.grp); aoes.length = 0;
+  for (const m of meteorFx) { removeAndDispose(m.rock); removeAndDispose(m.tg); } meteorFx.length = 0;
+  meteorWave = false; nestWave = false; meteorT = 0;
 }
 function beginRun() {
   goEl.style.display = 'none'; titleEl.style.display = 'none';
@@ -1761,8 +1784,42 @@ function planetHazard(dt, t) {
   } else if (th.hazard === 'ice') {
     hazardTimer -= dt;
     if (hazardTimer <= 0) { hazardTimer = 3.2; const d = pDir.clone().applyAxisAngle(randDir(), 0.15 + Math.random() * 0.3).normalize(); spawnAoe(d, 4.0, Math.round(9 * planetMul), 0x9fe0ff); }
+  } else if (th.hazard === 'sand') {        // 砂漠: 周期的な砂嵐AOE
+    hazardTimer -= dt;
+    if (hazardTimer <= 0) { hazardTimer = 2.8; for (let i = 0; i < 2; i++) { const d = pDir.clone().applyAxisAngle(randDir(), 0.15 + Math.random() * 0.4).normalize(); spawnAoe(d, 4.6, Math.round(9 * planetMul), 0xe6c98a); } }
+  } else if (th.hazard === 'poison') {      // 毒沼: 毒のしぶき
+    hazardTimer -= dt;
+    if (hazardTimer <= 0) { hazardTimer = 3.0; const d = pDir.clone().applyAxisAngle(randDir(), 0.1 + Math.random() * 0.35).normalize(); spawnAoe(d, 4.2, Math.round(8 * planetMul), 0x7ad04a); }
   } else if (th.hazard === 'heal') {        // 草原: ゆっくり回復
     regenT -= dt; if (regenT <= 0 && hurtFlash <= 0) { regenT = 1; hero.hp = Math.min(hero.maxHp, hero.hp + 1); updateHUD(); }
+  }
+  updateMeteors(dt);                        // 流星群イベント
+}
+// ---- 流星群イベント ----
+const meteorFx = [];
+let meteorWave = false, meteorT = 0, nestWave = false;
+function spawnMeteor() {
+  const dir = pDir.clone().applyAxisAngle(randDir(), 0.2 + Math.random() * 0.9).normalize();
+  const tg = new THREE.Mesh(aoeRingGeo, new THREE.MeshBasicMaterial({ color: 0xff5a20, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false }));
+  tg.position.copy(surfPos(dir, 0.15)); tg.quaternion.setFromUnitVectors(_MZ, dir); tg.scale.setScalar(4.6);
+  scene.add(tg);
+  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(0.95, 0), new THREE.MeshStandardMaterial({ color: 0x3a2418, emissive: 0xff4a10, emissiveIntensity: 1.3, roughness: 0.7 }));
+  scene.add(rock);
+  meteorFx.push({ rock, tg, start: surfPos(dir, 26), end: surfPos(dir, 0.7), t: 0, dur: 0.75, dir, dmg: Math.round(16 * planetMul) });
+}
+function updateMeteors(dt) {
+  if (meteorWave) { meteorT -= dt; if (meteorT <= 0) { meteorT = 0.7 + Math.random() * 0.7; spawnMeteor(); } }
+  for (let i = meteorFx.length - 1; i >= 0; i--) {
+    const m = meteorFx[i]; m.t += dt; const k = Math.min(1, m.t / m.dur);
+    m.rock.position.lerpVectors(m.start, m.end, k * k); m.rock.rotation.x += dt * 8; m.rock.rotation.y += dt * 6;
+    m.tg.material.opacity = 0.3 + 0.45 * k;
+    if (k >= 1) {
+      spawnImpact(m.end.clone(), 0xff7a2a, 14); shakeT = Math.max(shakeT, 0.3); Audio.sfx('hit'); spawnShock(m.dir.clone(), 5, 0xff5a20);
+      const co = Math.cos(5 / PLANET_R);
+      for (const o of enemies) if (o.alive && !(o.isBoss && o.invT > 0) && m.dir.dot(o.dir) > co) { o.hp -= m.dmg; o.hitFlash = 0.2; if (o.hp <= 0) killEnemy(o); }
+      if (pDir.dot(m.dir) > Math.cos(3.4 / PLANET_R)) hurtPlayer(m.dmg * 0.6, m.dir);
+      removeAndDispose(m.rock); removeAndDispose(m.tg); meteorFx.splice(i, 1);
+    }
   }
 }
 function updateAoes(dt) {
@@ -1781,15 +1838,15 @@ function updateAoes(dt) {
 // 惑星ごとのボス必殺技（フェーズで強化）
 function bossCast(e) {
   const ph = e.phase || 1, dmg = Math.round(e.atk * (1 + 0.15 * (ph - 1)));
-  if (e.theme === 1) {            // 雪: 氷弾（P2で5方向）
+  if (e.theme === 1 || e.theme === 4) {   // 雪/毒沼: 拡散弾（P2で5方向）
     Audio.sfx('skill');
     const offs = ph >= 2 ? [-0.6, -0.3, 0, 0.3, 0.6] : [-0.4, 0, 0.4];
     for (const off of offs) spawnProjectile(e.dir.clone(), pDir.clone().applyAxisAngle(e.dir, off).normalize(), dmg);
-  } else if (e.theme === 2) {     // 溶岩: 地割れAOE（P2で追加）
+  } else if (e.theme === 2 || e.theme === 3) {  // 溶岩/砂漠: 地割れAOE（P2で追加）
     spawnAoe(pDir.clone(), 5.4, Math.round(dmg * 1.2));
     spawnAoe(freeDir(false), 4.4, dmg);
     if (ph >= 2) spawnAoe(freeDir(false), 4.4, dmg);
-  } else if (e.theme === 3) {     // 異界: 放射弾幕（P2で密度↑）
+  } else if (e.theme === LAST_THEME) {    // 異界: 放射弾幕（P2で密度↑）
     Audio.sfx('skill');
     const cnt = ph >= 2 ? 12 : 8;
     for (let i = 0; i < cnt; i++) spawnProjectile(e.dir.clone(), pDir.clone().applyAxisAngle(e.dir, i / cnt * Math.PI * 2).normalize(), dmg);
@@ -2402,7 +2459,12 @@ function update(dt, t) {
     planetHazard(dt, t);
     // ウェーブ進行：全滅したら少し待って次のウェーブ
     if (waveBreak > 0) { waveBreak -= dt; if (waveBreak <= 0) { if ((wave + 1) % 5 === 0) startWave(wave + 1); else openNodePick(); } }
-    else if (enemies.length === 0) { waveBreak = 1.6; score += 50; saveBest(); showArea('WAVE ' + wave + ' クリア！', '+50'); updateHUD(); }
+    else if (enemies.length === 0) {
+      waveBreak = 1.6; score += 50; saveBest(); showArea('WAVE ' + wave + ' クリア！', '+50');
+      if (meteorWave) { meteorWave = false; score += 120; coins += 12; for (let i = 0; i < 3; i++) dropPickup('gem', randDir()); showArea('流星雨を生き抜いた！', '☄️ +ボーナス'); }
+      if (nestWave) { nestWave = false; score += 150; for (let i = 0; i < 4; i++) dropPickup('gem', randDir()); dropPickup('gear', pDir.clone(), rollGear(2 + (Math.random() < 0.5 ? 1 : 0))); showArea('精英の巣を制圧！', '🥚 +豪華報酬'); }
+      updateHUD();
+    }
   } else {
     camRot = 0;
   }
@@ -2472,12 +2534,9 @@ function update(dt, t) {
   ffMat.uniforms.uTime.value = t;
   skyUniforms.uTime.value = t;
   mistUniforms.uTime.value = t;
-  petals.material.uniforms.uTime.value = t;
-  rain.material.uniforms.uTime.value = t;
-  snow.material.uniforms.uTime.value = t;
-  // 天候はプレイヤーの真上から降らせる
-  petals.position.copy(player.position); rain.position.copy(player.position); snow.position.copy(player.position);
-  petals.quaternion.setFromUnitVectors(UPVEC, pDir); rain.quaternion.copy(petals.quaternion); snow.quaternion.copy(petals.quaternion);
+  // 天候はプレイヤーの真上から降らせる／舞わせる（表示中のものだけ更新）
+  const _wq = petals.quaternion.setFromUnitVectors(UPVEC, pDir);
+  for (const k in WEATHER_PTS) { const w = WEATHER_PTS[k]; if (!w.visible) continue; w.material.uniforms.uTime.value = t; w.position.copy(player.position); w.quaternion.copy(_wq); }
   // 溶岩/異界の地面の発光を脈動させる
   const th = THEMES[themeIndex];
   if (th.emI > 0) grassMat.emissiveIntensity = th.emI * (0.78 + 0.22 * Math.sin(t * 2.5));
