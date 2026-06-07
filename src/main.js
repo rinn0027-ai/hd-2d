@@ -852,6 +852,17 @@ function spawnShock(dir, r, color = 0xbf8aff) {
 const meshFx = [];                         // 任意メッシュのフェード（光柱・斬光など）
 function pushMeshFx(mesh, life, opts = {}) { scene.add(mesh); meshFx.push({ mesh, t: life, max: life, op0: opts.op0 ?? 1, grow: opts.grow || 0, rise: opts.rise || 0, spin: opts.spin || 0, up: opts.up || null }); }
 function emberSprite(color) { return new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); }
+// 近接の斬撃弧（武器の射程と振り角を地面に描いて見せる）
+const _sb = new THREE.Matrix4(), _sbx = new THREE.Vector3(), _sby = new THREE.Vector3();
+function spawnSlashArc(range, half, color) {
+  const inner = Math.max(0.7, range * 0.46);
+  const geo = new THREE.RingGeometry(inner, range, 26, 1, -half, half * 2);
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  _sbx.copy(heading); _sby.crossVectors(pDir, _sbx).normalize();
+  _sb.makeBasis(_sbx, _sby, pDir); m.quaternion.setFromRotationMatrix(_sb);
+  m.position.copy(surfPos(pDir, 0.35));
+  pushMeshFx(m, 0.22, { op0: 0.62, grow: 0.3 });
+}
 function tangentDir(a) { return _fwd.clone().multiplyScalar(Math.cos(a)).addScaledVector(_right, Math.sin(a)).normalize(); } // 接平面上の方位
 // 旋斬：炎の旋風
 function spawnFireWhirl() {
@@ -1132,10 +1143,10 @@ let pendingLevels = 0;
 const ATTACK_DUR = 0.32, ATTACK_RANGE = 3.6, JUMP_V = 7.5, GRAVITY = 20, DASH_T = 0.22, DASH_SPEED = 22, DASH_CD = 0.55;
 // 近接武器種：射程/コーン(向きdot閾値,低いほど広い)/威力倍/振り速度倍/見た目スケール
 const WEAPON_TYPES = {
-  sword:      { nm: '剣',   ic: '⚔', range: 3.6, cone: 0.2,  dmgMul: 1.0,  durMul: 1.0,  vscale: [1, 1, 1] },
-  spear:      { nm: '槍',   ic: '🔱', range: 5.2, cone: 0.5,  dmgMul: 1.05, durMul: 0.92, vscale: [0.55, 1.9, 0.55] },
-  greatsword: { nm: '大剣', ic: '🗡', range: 4.2, cone: -0.15, dmgMul: 1.7, durMul: 1.5,  vscale: [1.9, 1.25, 1.3] },
-  dual:       { nm: '双剣', ic: '⚔', range: 3.2, cone: 0.15, dmgMul: 0.62, durMul: 0.55, vscale: [0.8, 0.82, 0.8] },
+  sword:      { nm: '剣',   ic: '⚔️', range: 3.6, cone: 0.2,  dmgMul: 1.0,  durMul: 1.0,  vscale: [1.1, 1.1, 1.1],  arc: 1.0, col: 0xcfe6ff },
+  spear:      { nm: '槍',   ic: '🔱', range: 5.4, cone: 0.5,  dmgMul: 1.05, durMul: 0.92, vscale: [0.5, 2.1, 0.5],  arc: 0.32, col: 0x9fe8ff },
+  greatsword: { nm: '大剣', ic: '🗡️', range: 4.3, cone: -0.15, dmgMul: 1.7, durMul: 1.5,  vscale: [2.2, 1.35, 1.5], arc: 1.55, col: 0xfff0b0 },
+  dual:       { nm: '双剣', ic: '🔪', range: 3.2, cone: 0.15, dmgMul: 0.62, durMul: 0.55, vscale: [0.8, 0.85, 0.8], arc: 0.7, col: 0xbfe0ff },
 };
 const MELEE_CYCLE = ['sword', 'spear', 'greatsword', 'dual'];
 function curWT() { return WEAPON_TYPES[weapon] || WEAPON_TYPES.sword; }
@@ -1167,6 +1178,8 @@ function doAttack() {
 function applyWeaponVisual() {
   playerModel.setWeapon(weapon === 'bow' ? 'bow' : 'sword');
   if (playerModel.setWeaponType) playerModel.setWeaponType(weapon === 'bow' ? 'sword' : weapon);
+  const wb = document.getElementById('btnWep');
+  if (wb) wb.textContent = (weapon === 'bow' ? '🏹' : (WEAPON_TYPES[weapon] ? WEAPON_TYPES[weapon].ic : '⚔️'));
 }
 function switchWeapon() {
   const cycle = MELEE_CYCLE.concat(bowUnlocked ? ['bow'] : []);
@@ -2470,6 +2483,7 @@ function combatUpdate(dt, t) {
     const range = comboHeavy ? WT.range + 0.8 : WT.range;
     const cone = comboHeavy ? Math.min(WT.cone, -0.1) : WT.cone;   // 3段目は広範囲
     const co = Math.cos(range / PLANET_R);
+    spawnSlashArc(range, (comboHeavy ? WT.arc + 0.3 : WT.arc), WT.col);   // 射程と振り角を可視化
     if (comboHeavy) shakeT = Math.max(shakeT, 0.15);
     for (const e of enemies) {
       if (!e.alive) continue;
@@ -2667,10 +2681,10 @@ function update(dt, t) {
   // 武器の挥砍トレイル（剣/杖の刃先に追従する光の残像）
   if (skillT > 0 || (attackT > 0 && weapon !== 'bow')) {
     playerModel.tip.getWorldPosition(_tipW);
-    const col = skillT > 0 ? 0xff8a2a : (currentClass === 'mage' ? 0xbf8aff : 0xcfe6ff);
+    const col = skillT > 0 ? 0xff8a2a : (currentClass === 'mage' ? 0xbf8aff : curWT().col);
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
-    sp.position.copy(_tipW); sp.scale.setScalar(skillT > 0 ? 1.7 : 1.25);
-    scene.add(sp); fxList.push({ sp, v: new THREE.Vector3(), life: 0.16, max: 0.16 });
+    sp.position.copy(_tipW); sp.scale.setScalar(skillT > 0 ? 1.7 : (weapon === 'greatsword' ? 1.7 : weapon === 'spear' ? 1.0 : 1.3));
+    scene.add(sp); fxList.push({ sp, v: new THREE.Vector3(), life: 0.18, max: 0.18 });
   }
   player.visible = !(hurtFlash > 0 && Math.floor(t * 22) % 2 === 0); // 受傷時だけ点滅（ダッシュでは点滅しない）
   if (dashT > 0 && Math.floor(t * 60) % 2 === 0) { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x7fd8ff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true })); sp.position.copy(player.position).addScaledVector(_up, 1.0); sp.scale.setScalar(2.2); scene.add(sp); fxList.push({ sp, v: new THREE.Vector3(), life: 0.26, max: 0.26 }); } // ダッシュの残像トレイル
