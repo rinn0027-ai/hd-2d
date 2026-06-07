@@ -240,6 +240,20 @@
     body.touch #synBar { left: calc(var(--sal) + 14px); top: calc(var(--sat) + 198px); }
     #synBar span { font: 700 10px ui-monospace, monospace; color: #ffe6a8; background: rgba(40,30,10,.55); border: 1px solid rgba(255,210,110,.4); border-radius: 6px; padding: 1px 6px; text-shadow: 0 1px 2px #000; }
 
+    /* ボス登場カットイン */
+    #bossIntro { position: fixed; inset: 0; z-index: 17; display: flex; align-items: center; justify-content: center; pointer-events: none; opacity: 0; }
+    #bossIntro.show { animation: biShow 2.2s ease forwards; }
+    #bossIntro .biInner { text-align: center; transform: translateY(8px); }
+    #bossIntro.show .biInner { animation: biInner 2.2s cubic-bezier(.2,.8,.2,1) forwards; }
+    #bossIntro::before, #bossIntro::after { content: ''; position: absolute; left: 0; right: 0; height: 92px; background: linear-gradient(rgba(20,2,6,.0), rgba(20,2,6,.82)); }
+    #bossIntro::before { top: 50%; transform: translateY(-92px) scaleY(-1); }
+    #bossIntro::after { top: 50%; }
+    #bossIntro .biTag { font: 700 13px ui-monospace, monospace; letter-spacing: .4em; color: #ff7e6a; text-shadow: 0 2px 8px #000; margin-bottom: 6px; }
+    #bossIntro .biName { font: 800 30px/1.1 ui-monospace, monospace; color: #fff; text-shadow: 0 3px 14px #000, 0 0 26px rgba(255,90,70,.7); }
+    #bossIntro .biSub { font: 700 14px ui-monospace, monospace; letter-spacing: .26em; color: #ffd27a; margin-top: 6px; text-shadow: 0 2px 8px #000; }
+    @keyframes biShow { 0% { opacity: 0; } 12% { opacity: 1; } 82% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes biInner { 0% { transform: translateY(8px) scale(.9); letter-spacing: .5em; } 16% { transform: translateY(0) scale(1); } 100% { transform: translateY(0) scale(1.04); } }
+
     /* 受撃ビネット（暗角） */
     #vignette { position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: 0;
       box-shadow: inset 0 0 120px 40px rgba(220,30,30,.85), inset 0 0 40px 10px rgba(255,80,60,.6); transition: opacity .08s; }
@@ -489,6 +503,7 @@
   </div>
   <div id="tutorial"><h2 data-i18n="howto">？ あそびかた</h2><div id="tutBody"></div><div id="tutClose" class="luCard" data-i18n="gotit">OK</div></div>
   <div id="titleVer"></div>
+  <div id="bossIntro"><div class="biInner"><div class="biTag">⚠ WARNING</div><div class="biName" id="biName"></div><div class="biSub" id="biSub"></div></div></div>
   <div id="vignette"></div>
   <div id="toastWrap"></div>
   <div id="mutBar"></div>
@@ -501,6 +516,7 @@
     <div id="classRow"></div>
     <div id="titleBtns">
       <div id="tStart" class="luCard" data-i18n="start">▶ はじめる</div>
+      <div id="tBossRush" class="luCard" data-i18n="bossrush">⚔️ ボスラッシュ</div>
       <div id="tDaily" class="luCard" data-i18n="daily">📅 今日の挑戦</div>
       <div id="tCodex" class="luCard" data-i18n="codex">📖 図鑑・実績</div>
       <div id="tMeta" class="luCard" data-i18n="meta">💎 永久強化</div>

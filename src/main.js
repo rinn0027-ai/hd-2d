@@ -609,6 +609,7 @@ function applyPlayerStatus(type, dur) { if (hero[type] !== undefined) hero[type]
 let pdotT = 0;
 function playerDot(dt) {
   if (hero.burn > 0) hero.burn -= dt; if (hero.poison > 0) hero.poison -= dt;
+  const fr = relicCount('c_frenzy'); if (fr > 0 && hero.hp > 1) hero.hp = Math.max(1, hero.hp - fr * 1.0 * dt);  // 狂熱: HP徐々に減少
   if ((hero.burn > 0 || hero.poison > 0) && dashT <= 0) {
     pdotT -= dt;
     if (pdotT <= 0) { pdotT = 0.6; const d = (hero.burn > 0 ? 3 : 0) + (hero.poison > 0 ? 2 : 0); if (d > 0 && hero.hp > 1) { hero.hp = Math.max(1, hero.hp - d); hurtFlash = Math.max(hurtFlash, 0.12); updateHUD(); } }
@@ -693,7 +694,12 @@ function flash(color = '#fff', peak = 0.9) {
 
 // 昼夜でBGMの雰囲気を切替
 function dayNightMood() { return (Math.abs(timeOfDay - 0.5) * 2 > 0.55) ? 'night' : 'day'; }
-function planetMood() { return themeIndex === 0 ? dayNightMood() : ['', 'snow', 'lava', 'alien'][themeIndex]; }
+function planetMoodBase() { return ['day', 'snow', 'lava', 'desert', 'swamp', 'alien'][themeIndex] === 'day' ? dayNightMood() : ['day', 'snow', 'lava', 'desert', 'swamp', 'alien'][themeIndex]; }
+function musicMood() {
+  if (bossRef && bossRef.alive && bossIntroT <= 0) return 'boss';                 // ボス戦
+  if (gameState === 'field' && enemies.some(e => e.alive && !e.isBoss)) return 'battle'; // 戦闘中
+  return planetMoodBase();                                                        // 平時：星の曲
+}
 
 // ============================================================ 即時戦闘（ウェーブ制）
 const ENEMY_DEF = {
@@ -708,7 +714,8 @@ const ENEMY_DEF = {
 };
 const BOSS_DEF = { hp: 220, atk: 20, exp: 120, scale: 3.2, speed: 1.6, hover: 0, atkRange: 4.4, aggro: 999, behavior: 'boss', score: 300 };
 const enemies = [];
-let bossRef = null;
+let bossRef = null, bossIntroT = 0;
+const bossIntroEl = document.getElementById('bossIntro'), biName = document.getElementById('biName'), biSub = document.getElementById('biSub');
 let wave = 0, waveBreak = 0, score = 0, coins = 0;
 let hitStop = 0, slowMo = 0;
 
@@ -745,7 +752,7 @@ function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1, isChild = false) {
   for (const m of mats) { m.emissive.copy(m.color).multiplyScalar(elite ? 0.7 : 0.45); m.emissiveIntensity = elite ? 1.0 : 0.7; m.userData.be = m.emissive.clone(); }
   addOutline(e.root, 1.07);
   scene.add(e.root);
-  const hp = def.hp * hpScale * planetMul * (elite ? 2.6 : 1) * mEnemyHp * ngMul;
+  const hp = def.hp * hpScale * planetMul * (elite ? 2.6 : 1) * mEnemyHp * ngMul * Math.pow(1.3, relicCount('c_greed'));
   const en = { model: e, kind: key, def, dir: dir.clone().normalize(), hp, maxHp: hp, atk: def.atk * planetMul * (elite ? 1.5 : 1) * mEnemyAtk * ngMul, alive: true, atkCD: 1 + Math.random() * 1.5, bobT: Math.random() * 9, hitFlash: 0, dead: 0, chargeT: 0, mats, childScale, escale, elite, affix: elite ? ELITE_AFFIX[Math.floor(Math.random() * ELITE_AFFIX.length)] : null, burn: 0, poison: 0, freeze: 0 };
   if (elite) {
     const aura = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: AFFIX_COL[en.affix] || 0xffd27a, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 }));
@@ -762,7 +769,7 @@ function spawnEnemyDef(key, dir, hpScale = 1, childScale = 1, isChild = false) {
 function spawnBoss(n) {
   const e = M.makeBoss(THEMES[themeIndex].bossKind);
   discover('boss', themeIndex);
-  const hp = (BOSS_DEF.hp + (n - 5) * 60) * planetMul * mEnemyHp * ngMul;
+  const hp = (BOSS_DEF.hp + (n - 5) * 60) * planetMul * mEnemyHp * ngMul * Math.pow(1.3, relicCount('c_greed'));
   e.root.scale.setScalar(BOSS_DEF.scale * 0.9);
   const mats = collectMats(e.root);
   for (const m of mats) { m.userData.be = m.emissive.clone(); }
@@ -773,7 +780,15 @@ function spawnBoss(n) {
   Audio.sfx('encounter');
   document.getElementById('bossName').textContent = '◆ ' + THEMES[themeIndex].bossName + ' ◆';
   bossbarEl.style.display = 'block';
-  showArea('ボスが あらわれた！', THEMES[themeIndex].bossName);
+  startBossIntro(THEMES[themeIndex].bossName);     // 登場演出
+}
+// ---- ボス登場カットイン ----
+function startBossIntro(name) {
+  bossIntroT = 2.2; invulnT = Math.max(invulnT, 2.2); slowMo = Math.max(slowMo, 0.7); shakeT = Math.max(shakeT, 0.5);
+  if (bossRef) { bossRef.introScale0 = bossRef.escale; bossRef.model.root.scale.setScalar(bossRef.escale * 0.15); }
+  const sp = name.split(' '); const jp = sp[0], en = sp.slice(1).join(' ');
+  biName.textContent = jp; biSub.textContent = en || 'BOSS';
+  bossIntroEl.classList.remove('show'); void bossIntroEl.offsetWidth; bossIntroEl.classList.add('show');
 }
 function startWave(n) {
   wave = n;
@@ -998,7 +1013,7 @@ function updateArrowsP(dt) {
         if (bossBarrier(e)) { hit = true; break; }
         const crit = Math.random() < critTotal(); let tot = crit ? p.dmg * 2 : p.dmg;
         if (e.affix === 'tough') tot = Math.round(tot * 0.6);
-        tot = Math.round(tot * mPlayerDmg); tot = absorbShield(e, tot);
+        tot = Math.round(tot * mPlayerDmg * relicDmgMul()); tot = absorbShield(e, tot);
         e.hp -= tot; e.hitFlash = 0.18; registerHit(); if (crit) critFlash();
         if (Math.random() < 0.4) addStatus(e, 'poison', 4);   // 弓で毒
         if (relicCount('fire')) addStatus(e, 'burn', 3);
@@ -1085,7 +1100,7 @@ function updateCooldownUI() {
 function updateHUD() {
   hudHp.style.width = Math.max(0, hero.hp / hero.maxHp * 100) + '%';
   hudHpTxt.textContent = `HP ${Math.max(0, Math.ceil(hero.hp))}/${hero.maxHp}`;
-  hudLv.textContent = 'Lv ' + hero.level + (skillPoints > 0 ? ' ・SP' + skillPoints : '') + ' ・' + (weapon === 'bow' ? '🏹弓' : '⚔剣');
+  hudLv.textContent = 'Lv ' + hero.level + (skillPoints > 0 ? ' ・SP' + skillPoints : '') + ' ・' + (weapon === 'bow' ? '🏹弓' : (WEAPON_TYPES[weapon] ? WEAPON_TYPES[weapon].ic + WEAPON_TYPES[weapon].nm : '⚔剣'));
   hudExp.textContent = `EXP ${hero.exp}/${expToNext(hero.level)}`;
   hudWave.textContent = 'WAVE ' + wave;
   hudScore.textContent = 'SCORE ' + score + ' (BEST W' + best.wave + ')';
@@ -1115,6 +1130,16 @@ let equippedGear = null;                                  // 装備
 const gearBonus = { atk: 0, crit: 0, move: 0, lifesteal: 0, skillCd: 1 };
 let pendingLevels = 0;
 const ATTACK_DUR = 0.32, ATTACK_RANGE = 3.6, JUMP_V = 7.5, GRAVITY = 20, DASH_T = 0.22, DASH_SPEED = 22, DASH_CD = 0.55;
+// 近接武器種：射程/コーン(向きdot閾値,低いほど広い)/威力倍/振り速度倍/見た目スケール
+const WEAPON_TYPES = {
+  sword:      { nm: '剣',   ic: '⚔', range: 3.6, cone: 0.2,  dmgMul: 1.0,  durMul: 1.0,  vscale: [1, 1, 1] },
+  spear:      { nm: '槍',   ic: '🔱', range: 5.2, cone: 0.5,  dmgMul: 1.05, durMul: 0.92, vscale: [0.55, 1.9, 0.55] },
+  greatsword: { nm: '大剣', ic: '🗡', range: 4.2, cone: -0.15, dmgMul: 1.7, durMul: 1.5,  vscale: [1.9, 1.25, 1.3] },
+  dual:       { nm: '双剣', ic: '⚔', range: 3.2, cone: 0.15, dmgMul: 0.62, durMul: 0.55, vscale: [0.8, 0.82, 0.8] },
+};
+const MELEE_CYCLE = ['sword', 'spear', 'greatsword', 'dual'];
+function curWT() { return WEAPON_TYPES[weapon] || WEAPON_TYPES.sword; }
+function meleeDur() { return ATTACK_DUR * curWT().durMul; }
 const SKILL_DUR = 0.5, SKILL_CD = 3.5, SKILL_RANGE = 6.0;
 const hurtEl = document.getElementById('hurt'), vignetteEl = document.getElementById('vignette');
 let vignetteT = 0;
@@ -1131,18 +1156,25 @@ function doAttack() {
   }
   if (dashT > 0) {                              // ダッシュ斬り（強・広範囲・前進）
     dashAttack = true; comboHeavy = true; comboCount = 3; comboTimer = 0.7;
-    attackT = ATTACK_DUR; attackCD = 0.45 * atkCdMul; attackHit = false; dashT = Math.max(dashT, 0.14);
+    attackT = meleeDur(); attackCD = 0.45 * atkCdMul; attackHit = false; dashT = Math.max(dashT, 0.14);
     Audio.sfx('skill'); shakeT = Math.max(shakeT, 0.12); return;
   }
   comboCount = (comboTimer > 0) ? (comboCount % 3) + 1 : 1;  // 1→2→3 の連舞
   comboTimer = 0.7; comboHeavy = comboCount >= 3;
-  attackT = ATTACK_DUR; attackCD = (comboHeavy ? 0.5 : 0.32) * atkCdMul; attackHit = false;
+  attackT = meleeDur(); attackCD = (comboHeavy ? 0.5 : 0.32) * curWT().durMul * atkCdMul; attackHit = false;
   Audio.sfx(comboHeavy ? 'skill' : 'attack');
 }
+function applyWeaponVisual() {
+  playerModel.setWeapon(weapon === 'bow' ? 'bow' : 'sword');
+  if (playerModel.setWeaponType) playerModel.setWeaponType(weapon === 'bow' ? 'sword' : weapon);
+}
 function switchWeapon() {
-  if (!bowUnlocked) { showArea('弓は スキルツリーで習得', 'LOCKED'); return; }
-  weapon = weapon === 'sword' ? 'bow' : 'sword'; Audio.sfx('cursor'); playerModel.setWeapon(weapon);
-  showArea(weapon === 'bow' ? '弓に持ち替えた' : '剣に持ち替えた', weapon.toUpperCase());
+  const cycle = MELEE_CYCLE.concat(bowUnlocked ? ['bow'] : []);
+  const idx = cycle.indexOf(weapon);
+  weapon = cycle[(idx + 1) % cycle.length];
+  Audio.sfx('cursor'); applyWeaponVisual();
+  const lbl = weapon === 'bow' ? '弓' : WEAPON_TYPES[weapon].nm;
+  showArea(lbl + ' に持ち替えた', lbl);
 }
 function ringDamage(r, dmg, color, knock, applyStatus) {
   dmg = Math.round(dmg * mPlayerDmg);
@@ -1202,7 +1234,7 @@ function doDash() {
 }
 function hurtPlayer(dmg, fromDir) {
   if (invulnT > 0 || dashT > 0) return;
-  dmg = dmg * mDmgTaken;
+  dmg = dmg * mDmgTaken * playerDmgTakenMul();
   hero.hp -= dmg; invulnT = 0.7; hurtFlash = 0.4; shakeT = Math.max(shakeT, 0.25); Audio.sfx('hit');
   vignetteT = 0.5;
   showDmg(player.position.clone().addScaledVector(pDir, 2.6), Math.round(dmg));
@@ -1266,6 +1298,12 @@ function killEnemy(e) {
     for (let i = 0; i < 8; i++) dropPickup('coin', randDir().lerp(e.dir, 0.5).normalize());
     hero.hp = hero.maxHp; Audio.sfx('victory');
     showArea(THEMES[e.theme].bossName + ' 撃破！', 'BOSS DEFEATED');
+    if (bossRush) {                                                // ボスラッシュ：全ボス連戦
+      score += 300; meta.stats.bossKills = meta.stats.bossKills;
+      if (rushIndex >= LAST_THEME) { meta.stats.cleared = true; checkAch(); setTimeout(() => { if (gameState !== 'none') gameOver(true); }, 1500); }
+      else setTimeout(() => { if (gameState === 'field') offerRelics(() => nextRushBoss()); }, 1300);
+      updateHUD(); return;
+    }
     if (e.theme === LAST_THEME) {                                   // 異界ボス＝星系制覇 → 凱旋 or NG+
       meta.stats.cleared = true; checkAch();
       setTimeout(() => {
@@ -1459,17 +1497,24 @@ const RELIC_DEFS = [
   { k: 'gold',  ic: '💰', nm: '黄金の手', ds: 'コイン+1' },
   { k: 'amp',   ic: '🔮', nm: '魔力増幅', ds: 'スキル威力+35%' },
   { k: 'thorn', ic: '🛡️', nm: '茨の鎧', ds: '被弾時に周囲反撃' },
+  // ---- 呪い遺物（高リスク・高リターン）----
+  { k: 'c_blood',  ic: '🩸', nm: '血の渇き', ds: '与ダメ+45% / 被ダメ+30%', curse: true },
+  { k: 'c_glass',  ic: '💠', nm: '硝子細工', ds: '暴撃+30% / 被ダメ+30%', curse: true },
+  { k: 'c_greed',  ic: '🪙', nm: '強欲の壺', ds: 'コイン+3・💎+25% / 敵HP+30%', curse: true },
+  { k: 'c_frenzy', ic: '⏱️', nm: '狂熱', ds: '攻撃・スキル加速 / HP徐々に減少', curse: true },
 ];
 const RELIC_MAP = {}; for (const r of RELIC_DEFS) RELIC_MAP[r.k] = r;
 let relics = [];
 function relicCount(k) { let n = 0; for (const r of relics) if (r === k) n++; return n; }
-function skillDmgMul() { return 1 + relicCount('amp') * 0.35; }
-function critTotal() { return 0.2 + gearBonus.crit + classCrit + relicCount('crit') * 0.15; }
+function skillDmgMul() { return (1 + relicCount('amp') * 0.35) * relicDmgMul(); }
+function relicDmgMul() { return 1 + relicCount('c_blood') * 0.45; }                 // 呪い: 与ダメ
+function playerDmgTakenMul() { return 1 + (relicCount('c_blood') + relicCount('c_glass')) * 0.30; } // 呪い: 被ダメ
+function critTotal() { return 0.2 + gearBonus.crit + classCrit + relicCount('crit') * 0.15 + relicCount('c_glass') * 0.30; }
 function lifestealTotal() { return gearBonus.lifesteal + relicCount('vamp') * 0.10; }
 function recomputeStats() {
   const c = CLASSES[currentClass];
   moveMul = (1 + meta.move * 0.05) * c.move * Math.pow(1.12, relicCount('swift'));
-  coinBonus = meta.coin + relicCount('gold');
+  coinBonus = meta.coin + relicCount('gold') + relicCount('c_greed') * 3;
 }
 const relicBarEl = document.getElementById('relicBar'), synBarEl = document.getElementById('synBar');
 // 遺物シナジー（2種同時所持で発動）
@@ -1490,6 +1535,7 @@ function renderRelicBar() {
 }
 function addRelic(k) {
   const before = activeSyns(); relics.push(k); recomputeStats(); renderRelicBar(); discover('relic', k);
+  if (k === 'c_frenzy') { atkCdMul *= 0.78; skillCdMul *= 0.8; }       // 狂熱: 攻撃/スキル加速（取得時）
   Audio.sfx('chest'); showArea(RELIC_MAP[k].nm + ' を獲得', RELIC_MAP[k].ds);
   const fresh = activeSyns().filter(s => !before.includes(s));
   if (fresh.length) setTimeout(() => showArea('シナジー: ' + fresh[0].nm, fresh[0].ds), 1000);
@@ -1559,12 +1605,21 @@ function showChooser(title, items) {
 }
 function offerRelics(after) {
   after = after || (() => { gameState = 'field'; });
-  const pool = RELIC_DEFS.slice(); const items = [];
+  const pool = RELIC_DEFS.filter(d => !d.curse); const items = [];
   for (let i = 0; i < 3 && pool.length; i++) {
     const d = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
     items.push({ ic: d.ic, nm: d.nm, ds: d.ds, pick: () => { addRelic(d.k); after(); } });
   }
   showChooser('遺物を選べ', items);
+}
+function offerCurses(after) {
+  after = after || (() => { gameState = 'field'; });
+  const pool = RELIC_DEFS.filter(d => d.curse); const items = [];
+  for (let i = 0; i < 3 && pool.length; i++) {
+    const d = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+    items.push({ ic: d.ic, nm: '【呪】' + d.nm, ds: d.ds, pick: () => { addRelic(d.k); after(); } });
+  }
+  showChooser('呪いの祭壇：力と引き換えに', items);
 }
 // ---- タイトルの職業選択 ----
 const classRowEl = document.getElementById('classRow');
@@ -1602,10 +1657,11 @@ function openNodePick() {
     meteor:   { ic: '☄️', nm: '流星雨', ds: '隕石の雨＋大量報酬', pick: () => { pushNode('meteor'); meteorWave = true; meteorT = 1.2; advanceWave(); } },
     caravan:  { ic: '🐫', nm: '隊商', ds: '遺物を貰い買い物', pick: () => { pushNode('caravan'); offerRelics(() => { pendingAfterShop = true; openShop(); }); } },
     nest:     { ic: '🥚', nm: '精英の巣', ds: '精英の群れ＋豪華報酬', pick: () => { pushNode('nest'); forceElite = 6; nestWave = true; advanceWave(); } },
+    altar:    { ic: '🔮', nm: '呪いの祭壇', ds: '呪い遺物（高リスク高火力）', pick: () => { pushNode('altar'); offerCurses(() => advanceWave()); } },
   };
   let pool = extras.filter(k => !(k === 'shop' && mNoShop));   // 貧窮: 商店ノード除外
-  // 35%でイベントノードを1つ混ぜる
-  if (Math.random() < 0.35) { const ev = ['meteor', 'caravan', 'nest'][Math.floor(Math.random() * 3)]; pool[1] = ev; }
+  // 38%でイベントノードを1つ混ぜる
+  if (Math.random() < 0.38) { const ev = ['meteor', 'caravan', 'nest', 'altar'][Math.floor(Math.random() * 4)]; pool[1] = ev; }
   const items = [NODES.battle, NODES[pool[0]], NODES[pool[1]]];
   showChooser('星図：次の地を選べ', items);
 }
@@ -1643,6 +1699,7 @@ function discover(cat, key) { if (!meta.codex[cat][key]) { meta.codex[cat][key] 
 // ---- 変異詞条 ----
 let mEnemyHp = 1, mEnemyAtk = 1, mEnemySpeed = 1, mPlayerDmg = 1, mPlayerHp = 1, mDmgTaken = 1, mGem = 1, mNoShop = false;
 let activeMuts = [], pendingMuts = null, pendingDaily = false, dailyMode = false, ngLoop = 0, ngMul = 1;
+let bossRush = false, rushIndex = 0;
 const MUTATORS = [
   { k: 'haste',   nm: '⚡倍速', ds: '敵速+50% / 💎+50%', ap() { mEnemySpeed *= 1.5; mGem *= 1.5; } },
   { k: 'tank',    nm: '🛡硬化', ds: '敵HP+60% / 💎+40%', ap() { mEnemyHp *= 1.6; mGem *= 1.4; } },
@@ -1671,9 +1728,17 @@ function continueNG() {
   runNodes = ['start']; renderStarmap();
   startWave(wave + 1); updateHUD(); showArea('NEW GAME+ ' + ngLoop, '難度上昇');
 }
+// ボスラッシュ：次のボスへ
+function nextRushBoss() {
+  chooserEl.style.display = 'none'; gameState = 'field'; waveBreak = 0;
+  clearRun();
+  rushIndex++; themeIndex = Math.min(rushIndex, LAST_THEME); applyTheme(themeIndex);
+  hero.hp = hero.maxHp; pDir.set(0, 1, 0); jumpH = 0; jumpV = 0; grounded = true; invulnT = 1.5;
+  spawnBoss(8 + rushIndex * 6); updateHUD(); showArea(THEMES[themeIndex].name, THEMES[themeIndex].en);
+}
 
 // ---- 星図ノード履歴 ----
-const NODE_IC = { start: '🚩', battle: '⚔️', elite: '👑', rest: '🏕️', shop: '🛒', treasure: '🎁', boss: '💀' };
+const NODE_IC = { start: '🚩', battle: '⚔️', elite: '👑', rest: '🏕️', shop: '🛒', treasure: '🎁', boss: '💀', meteor: '☄️', caravan: '🐫', nest: '🥚', altar: '🔮' };
 let runNodes = [];
 function pushNode(t) { runNodes.push(t); if (runNodes.length > 12) runNodes.shift(); renderStarmap(); }
 function renderStarmap() {
@@ -1727,7 +1792,7 @@ function gameOver(cleared) {
   saveBest(); pushBoard(score, wave);
   meta.stats.maxWave = Math.max(meta.stats.maxWave, wave); checkAch();
   if (dailyMode) recordDaily(score, wave);
-  const earned = Math.floor((coins * 0.5 + wave * 3 + (cleared ? 80 : 0) + ngLoop * 40) * mGem);
+  const earned = Math.floor((coins * 0.5 + wave * 3 + (cleared ? 80 : 0) + ngLoop * 40) * mGem * (1 + relicCount('c_greed') * 0.25));
   meta.gems += earned; saveMeta();
   gameState = 'gameover'; resetTouch();
   goTitleEl.textContent = cleared ? '★ STAGE CLEAR ★' : 'GAME OVER';
@@ -1738,7 +1803,7 @@ function gameOver(cleared) {
   goEl.style.display = 'flex';
 }
 function clearRun() {
-  for (const e of enemies) removeAndDispose(e.model.root); enemies.length = 0; bossRef = null; bossbarEl.style.display = 'none';
+  for (const e of enemies) removeAndDispose(e.model.root); enemies.length = 0; bossRef = null; bossIntroT = 0; bossbarEl.style.display = 'none';
   for (const p of pickups) removeAndDispose(p.obj); pickups.length = 0;
   for (const pr of projectiles) removeAndDispose(pr.mesh); projectiles.length = 0;
   for (const ar of arrows) removeAndDispose(ar.mesh); arrows.length = 0;
@@ -1761,17 +1826,21 @@ function beginRun() {
   resetRunMods(); if (pendingMuts) { applyMuts(pendingMuts); dailyMode = pendingDaily; } // 変異/日替わり
   applyMeta();                          // メタ強化を反映（HP/攻撃/移動/弓/復活/金運）
   applyClass();                         // 職業を反映（HP/攻撃/弓/暴撃/CD/スキル2）
-  playerModel.setClass(currentClass); playerModel.setWeapon(weapon); // 見た目（職業・武器）
+  playerModel.setClass(currentClass); applyWeaponVisual(); // 見た目（職業・武器種）
   hero.maxHp = Math.max(1, Math.round(hero.maxHp * mPlayerHp)); hero.hp = hero.maxHp; // 変異HP補正
   recomputeStats(); renderRelicBar();   // 遺物（最初は空）込みで再計算
   runNodes = ['start']; renderStarmap(); discover('cls', currentClass); meta.stats.runs++;
   meta.lastClass = currentClass; saveMeta();
   pDir.set(0, 1, 0); jumpH = 0; jumpV = 0; grounded = true; invulnT = 1.5;
-  wave = 0; gameState = 'field'; startWave(1); updateHUD();
+  wave = 0; gameState = 'field';
+  if (bossRush) { rushIndex = 0; themeIndex = 0; applyTheme(0); wave = 5; spawnBoss(8); }   // ボスラッシュ：いきなりボス
+  else startWave(1);
+  updateHUD();
 }
-function restartRun() { beginRun(); showArea('リスタート', 'RESTART'); }
-function startGame() { pendingMuts = null; pendingDaily = false; beginRun(); showArea('はじまり', THEMES[0].en); }
-function startDaily() { pendingMuts = dailyMutKeys(); pendingDaily = true; beginRun(); showArea('今日の挑戦', activeMuts.map(m => m.nm).join(' ')); }
+function restartRun() { beginRun(); showArea(bossRush ? 'ボスラッシュ' : 'リスタート', 'RESTART'); }
+function startGame() { bossRush = false; pendingMuts = null; pendingDaily = false; beginRun(); showArea('はじまり', THEMES[0].en); }
+function startDaily() { bossRush = false; pendingMuts = dailyMutKeys(); pendingDaily = true; beginRun(); showArea('今日の挑戦', activeMuts.map(m => m.nm).join(' ')); }
+function startBossRush() { bossRush = true; pendingMuts = null; pendingDaily = false; beginRun(); showArea('ボスラッシュ', 'BOSS RUSH'); }
 function backToTitle() { goEl.style.display = 'none'; gameState = 'title'; clearRun(); resetTouch(); titleEl.style.display = 'flex'; }
 goRestartEl.addEventListener('click', restartRun);
 goRestartEl.addEventListener('touchstart', e => { e.preventDefault(); restartRun(); }, { passive: false });
@@ -1792,7 +1861,7 @@ function showTitle() {
 document.getElementById('tStart').addEventListener('click', () => { kickAudio(); startGame(); });
 document.getElementById('tStart').addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); startGame(); }, { passive: false });
 { const bind = (id, fn) => { const el = document.getElementById(id); el.addEventListener('click', () => { kickAudio(); fn(); }); el.addEventListener('touchstart', e => { e.preventDefault(); kickAudio(); fn(); }, { passive: false }); };
-  bind('tDaily', startDaily); bind('tCodex', openCodex); }
+  bind('tDaily', startDaily); bind('tCodex', openCodex); bind('tBossRush', startBossRush); }
 document.getElementById('tMeta').addEventListener('click', () => { titleEl.style.display = 'none'; openMeta('title'); });
 document.getElementById('tMeta').addEventListener('touchstart', e => { e.preventDefault(); titleEl.style.display = 'none'; openMeta('title'); }, { passive: false });
 function togglePause() {
@@ -2198,11 +2267,11 @@ syncUI();
 // ============================================================ 設定 / i18n / チュートリアル / PWA
 const APP_VERSION = 'v1.0';
 const I18N = {
-  ja: { settings: '⚙ 設定', lang: '言語', quality: '画質', qLow: '低', qMed: '中', qHigh: '高', master: '音量', bgm: 'BGM', sfx: '効果音', resetSave: 'セーブを初期化', back: 'もどる', howto: '？ あそびかた', gotit: 'はじめる', pause: 'PAUSE', resume: 'つづける', meta: '💎 永久強化', toTitle: 'タイトルへ', start: '▶ はじめる', daily: '📅 今日の挑戦', codex: '📖 図鑑・実績', help: '？ あそびかた', resetConfirm: 'セーブデータを初期化しますか？',
+  ja: { settings: '⚙ 設定', lang: '言語', quality: '画質', qLow: '低', qMed: '中', qHigh: '高', master: '音量', bgm: 'BGM', sfx: '効果音', resetSave: 'セーブを初期化', back: 'もどる', howto: '？ あそびかた', gotit: 'はじめる', pause: 'PAUSE', resume: 'つづける', meta: '💎 永久強化', toTitle: 'タイトルへ', start: '▶ はじめる', bossrush: '⚔️ ボスラッシュ', daily: '📅 今日の挑戦', codex: '📖 図鑑・実績', help: '？ あそびかた', resetConfirm: 'セーブデータを初期化しますか？',
     tutBody: '【移動】左スティック / WASD（強く倒すとダッシュ）\n【攻撃】右下ボタン / J　【ジャンプ】Space\n【回避】DASH / K　【スキル】旋斬・衝撃 / L・U\n【必殺】ゲージ満タンで発動 / Q\n【武器】弓に持ち替え / R　【視点】右ドラッグ\n\n小さな星をめぐり、ウェーブを生き延びよう。\nボス撃破で遺物を獲得、星図で道を選ぶ。\n死んでも💎は貯まり、永久強化に使える。' },
-  zh: { settings: '⚙ 设置', lang: '语言', quality: '画质', qLow: '低', qMed: '中', qHigh: '高', master: '总音量', bgm: '音乐', sfx: '音效', resetSave: '清除存档', back: '返回', howto: '？ 玩法说明', gotit: '开始', pause: '暂停', resume: '继续', meta: '💎 永久强化', toTitle: '回到标题', start: '▶ 开始游戏', daily: '📅 每日挑战', codex: '📖 图鉴・成就', help: '？ 玩法说明', resetConfirm: '确定要清除存档吗？',
+  zh: { settings: '⚙ 设置', lang: '语言', quality: '画质', qLow: '低', qMed: '中', qHigh: '高', master: '总音量', bgm: '音乐', sfx: '音效', resetSave: '清除存档', back: '返回', howto: '？ 玩法说明', gotit: '开始', pause: '暂停', resume: '继续', meta: '💎 永久强化', toTitle: '回到标题', start: '▶ 开始游戏', bossrush: '⚔️ Boss Rush', daily: '📅 每日挑战', codex: '📖 图鉴・成就', help: '？ 玩法说明', resetConfirm: '确定要清除存档吗？',
     tutBody: '【移动】左摇杆 / WASD（推到底冲刺）\n【攻击】右下按钮 / J　【跳跃】空格\n【闪避】DASH / K　【技能】旋斩・冲击波 / L・U\n【必杀】能量满时发动 / Q\n【武器】切换弓 / R　【视角】右侧拖动\n\n环游小行星，撑过一波波敌人。\n击败 Boss 获得遗物，在星图上选择路线。\n死亡也会积累💎，用于永久强化。' },
-  en: { settings: '⚙ Settings', lang: 'Language', quality: 'Quality', qLow: 'Low', qMed: 'Med', qHigh: 'High', master: 'Master', bgm: 'Music', sfx: 'SFX', resetSave: 'Reset Save', back: 'Back', howto: '? How to Play', gotit: 'Start', pause: 'PAUSE', resume: 'Resume', meta: '💎 Upgrades', toTitle: 'Title', start: '▶ Start', daily: '📅 Daily', codex: '📖 Codex', help: '? How to Play', resetConfirm: 'Reset all saved data?',
+  en: { settings: '⚙ Settings', lang: 'Language', quality: 'Quality', qLow: 'Low', qMed: 'Med', qHigh: 'High', master: 'Master', bgm: 'Music', sfx: 'SFX', resetSave: 'Reset Save', back: 'Back', howto: '? How to Play', gotit: 'Start', pause: 'PAUSE', resume: 'Resume', meta: '💎 Upgrades', toTitle: 'Title', start: '▶ Start', bossrush: '⚔️ Boss Rush', daily: '📅 Daily', codex: '📖 Codex', help: '? How to Play', resetConfirm: 'Reset all saved data?',
     tutBody: 'Move: left stick / WASD (push hard to dash)\nAttack: bottom-right / J   Jump: Space\nDodge: DASH / K   Skills: Spin / Shock = L / U\nUltimate: when gauge is full / Q\nWeapon: swap bow / R   Camera: drag right side\n\nTravel tiny planets and survive the waves.\nBeat bosses for relics; choose your path on the star map.\nGems (💎) persist on death for permanent upgrades.' },
 };
 function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
@@ -2393,11 +2462,13 @@ function orientStanding(obj, up, fwd) {
 
 // 敵AI + 攻撃判定（フィールド）
 function combatUpdate(dt, t) {
+  if (bossIntroT > 0) { bossIntroT -= dt; if (bossIntroT <= 0 && bossRef) bossRef.model.root.scale.setScalar(bossRef.escale); }
   // プレイヤー通常攻撃のヒット判定（振りの中盤で1回）
-  if (attackT > 0 && !attackHit && attackT < ATTACK_DUR * 0.66) {
+  if (attackT > 0 && !attackHit && attackT < meleeDur() * 0.66) {
     attackHit = true;
-    const range = comboHeavy ? ATTACK_RANGE + 0.8 : ATTACK_RANGE;
-    const cone = comboHeavy ? -0.1 : 0.2;       // 3段目は広範囲
+    const WT = curWT();
+    const range = comboHeavy ? WT.range + 0.8 : WT.range;
+    const cone = comboHeavy ? Math.min(WT.cone, -0.1) : WT.cone;   // 3段目は広範囲
     const co = Math.cos(range / PLANET_R);
     if (comboHeavy) shakeT = Math.max(shakeT, 0.15);
     for (const e of enemies) {
@@ -2406,12 +2477,12 @@ function combatUpdate(dt, t) {
       _md.copy(e.dir).addScaledVector(pDir, -d);
       if (_md.lengthSq() < 1e-6 || _md.normalize().dot(heading) < cone) continue;
       if (bossBarrier(e)) continue;
-      let dmg = 8 + hero.level * 2 + atkBonus + gearBonus.atk + Math.floor(Math.random() * 5);
+      let dmg = (8 + hero.level * 2 + atkBonus + gearBonus.atk + Math.floor(Math.random() * 5)) * WT.dmgMul;
       if (comboHeavy) dmg = Math.floor(dmg * 1.8);
       if (dashAttack) dmg = Math.floor(dmg * 1.4);
       const crit = Math.random() < critTotal(); let tot = crit ? dmg * 2 : dmg;
       if (e.affix === 'tough') tot = Math.round(tot * 0.6);
-      tot = Math.round(tot * mPlayerDmg); tot = absorbShield(e, tot);
+      tot = Math.round(tot * mPlayerDmg * relicDmgMul()); tot = absorbShield(e, tot);
       e.hp -= tot; e.hitFlash = 0.18; registerHit();
       if (comboHeavy) addStatus(e, 'freeze', 1.5);            // 3段で凍結
       if (relicCount('fire')) addStatus(e, 'burn', 3);
@@ -2444,6 +2515,13 @@ function combatUpdate(dt, t) {
     const d = THREE.MathUtils.clamp(pDir.dot(e.dir), -1, 1);
     const angDist = Math.acos(d) * PLANET_R;
     const bh = e.def.behavior;
+    if (e.isBoss && bossIntroT > 0) {                        // 登場演出中：入場スケールのみ、AI停止
+      const k = 1 - bossIntroT / 2.2, sc = (e.introScale0 || e.escale) * (0.15 + 0.85 * (1 - (1 - k) * (1 - k)));
+      e.model.root.scale.setScalar(sc);
+      e.model.root.position.copy(surfPos(e.dir, e.def.hover + 0.12));
+      _md.copy(pDir).addScaledVector(e.dir, -d); orientStanding(e.model.root, e.dir, _md.lengthSq() > 1e-6 ? _md : heading);
+      continue;
+    }
     const frz = (e.freeze > 0 ? 0.4 : 1) * ((e.affix === 'enrage' && e.hp < e.maxHp * 0.4) ? 1.7 : 1) * (e.enrageMul || 1) * mEnemySpeed; // 凍結減速 / 狂暴・怒り加速 / 変異速度
     if ((e.windup || 0) > 0) {                               // 攻撃の予備動作中：その場で構えて着弾を待つ
       e.windup -= dt;
@@ -2556,8 +2634,9 @@ function update(dt, t) {
     updatePickups(dt);
     planetHazard(dt, t);
     playerDot(dt); updatePlayerAura(dt); renderPStatus();
-    // ウェーブ進行：全滅したら少し待って次のウェーブ
-    if (waveBreak > 0) { waveBreak -= dt; if (waveBreak <= 0) { if ((wave + 1) % 5 === 0) startWave(wave + 1); else openNodePick(); } }
+    // ウェーブ進行：全滅したら少し待って次のウェーブ（ボスラッシュは killEnemy 側で進行）
+    if (bossRush) { /* ボスラッシュ中は通常ウェーブ進行なし */ }
+    else if (waveBreak > 0) { waveBreak -= dt; if (waveBreak <= 0) { if ((wave + 1) % 5 === 0) startWave(wave + 1); else openNodePick(); } }
     else if (enemies.length === 0) {
       waveBreak = 1.6; score += 50; saveBest(); showArea('WAVE ' + wave + ' クリア！', '+50');
       if (meteorWave) { meteorWave = false; score += 120; coins += 12; for (let i = 0; i < 3; i++) dropPickup('gem', randDir()); showArea('流星雨を生き抜いた！', '☄️ +ボーナス'); }
@@ -2583,7 +2662,7 @@ function update(dt, t) {
   player.position.copy(pDir).multiplyScalar(PLANET_R + PLAYER_LIFT + jumpH + Math.sin(t * 2.2) * 0.04);
   orientStanding(player, _up, heading);
   if (skillT > 0) player.rotateOnAxis(UPVEC, (1 - skillT / SKILL_DUR) * Math.PI * 5); // スキル中はスピン
-  const attackP = attackT > 0 ? (1 - attackT / ATTACK_DUR) : 0;
+  const attackP = attackT > 0 ? (1 - attackT / (weapon === 'bow' ? 0.2 : meleeDur())) : 0;
   playerModel.update(dt, playerMoving && jumpH < 0.1, dash ? 1.4 : 1.0, attackP);
   // 武器の挥砍トレイル（剣/杖の刃先に追従する光の残像）
   if (skillT > 0 || (attackT > 0 && weapon !== 'bow')) {
@@ -2643,7 +2722,7 @@ function update(dt, t) {
   // 太陽は惑星中心を照らす（歩くと昼/夜の境界を越えられる）
   sun.target.position.set(0, 0, 0);
   applyTimeOfDay(timeOfDay);
-  if (Audio.audioReady()) Audio.setMood(planetMood());
+  if (Audio.audioReady()) Audio.setMood(musicMood());
 }
 
 function animate() {

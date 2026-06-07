@@ -82,6 +82,8 @@ export function makeHumanoid(opts = {}) {
     mage:    { cloth: 0x432f7a, pants: 0x2a2050, hat: 0x5a3aa0, cape: 0x2a2060 },
   };
   let meleeKind = 'sword', curWeapon = 'sword';
+  const WT_SCALE = { sword: [1, 1, 1], spear: [0.55, 1.9, 0.55], greatsword: [1.9, 1.25, 1.3], dual: [0.8, 0.82, 0.8] };
+  function setWeaponType(type) { const s = WT_SCALE[type] || WT_SCALE.sword; sword.scale.set(s[0], s[1], s[2]); }
   function setWeapon(type) {
     curWeapon = type; const bowOn = type === 'bow';
     bow.visible = bowOn; sword.visible = !bowOn && meleeKind === 'sword'; staff.visible = !bowOn && meleeKind === 'staff';
@@ -126,7 +128,7 @@ export function makeHumanoid(opts = {}) {
       armR.rotation.z = 0;
     }
   }
-  return { root, update, setClass, setWeapon, tip, height: 2.4 };
+  return { root, update, setClass, setWeapon, setWeaponType, tip, height: 2.4 };
 }
 
 // ============================================================ 木

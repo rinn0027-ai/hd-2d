@@ -98,6 +98,15 @@ const SONGS = {
   battle:{ tempo: 170, wave: 'sawtooth', drums: true,
     mel:  [294, 349, 440, 349, 587, 440, 349, 294, 330, 392, 494, 392, 294, 0, 587, 0],
     bass: [147, 147, 175, 196] },
+  boss:  { tempo: 150, wave: 'sawtooth', drums: true, lp: 1600,
+    mel:  [262, 311, 392, 311, 523, 392, 311, 262, 233, 349, 466, 349, 311, 392, 523, 587],
+    bass: [98, 98, 116, 104] },                                    // 重く緊迫
+  desert:{ tempo: 200, wave: 'triangle', drums: true,
+    mel:  [349, 392, 440, 0, 523, 440, 392, 0, 330, 392, 440, 523, 587, 0, 440, 0],
+    bass: [131, 165, 196, 147] },
+  swamp: { tempo: 240, wave: 'sine', drums: false, lp: 800,
+    mel:  [220, 0, 262, 247, 220, 0, 196, 0, 233, 0, 277, 0, 247, 0, 220, 0],
+    bass: [110, 98, 117, 104] },
 };
 function bgmNote(freq, dur, wave, vol, lp = 1500) {
   if (!ctx || !freq) return;
